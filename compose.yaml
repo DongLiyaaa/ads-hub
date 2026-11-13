@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16.14-bookworm
+    container_name: search-share-dashboard-postgres
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sharescope}
+      POSTGRES_USER: ${POSTGRES_USER:-sharescope}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+    ports:
+      - "127.0.0.1:55434:5432"
+    volumes:
+      - sharescope-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  dashboard:
+    container_name: search-share-dashboard
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: search-share-dashboard:1.0.0
+    environment:
+      CODEX_CLI_PATH: /app/node_modules/.bin/codex
+      CLAUDE_CLI_PATH: /app/node_modules/.bin/claude
+      MODEL_CONFIG_ENCRYPTION_KEY: ${MODEL_CONFIG_ENCRYPTION_KEY:?Set MODEL_CONFIG_ENCRYPTION_KEY in .env}
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-sharescope}
+      PGUSER: ${POSTGRES_USER:-sharescope}
+      PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${CODEX_HOME:-/Users/dongli/.codex}/auth.json:/mnt/codex/auth.json:ro
+      - ${CODEX_HOME:-/Users/dongli/.codex}/config.toml:/mnt/codex/config.toml:ro
+    ports:
+      - "127.0.0.1:18090:80"
+    restart: unless-stopped
+
+volumes:
+  sharescope-postgres-data:
+    name: sharescope-postgres-data
