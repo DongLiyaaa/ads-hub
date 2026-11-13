@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../lib/api.js';
 
 export function formatAnalysisTime(value) {
   if (!value) return '生成时间未知';
@@ -10,7 +11,7 @@ export function formatAnalysisTime(value) {
   }).format(date);
 }
 
-export default function usePersistentAnalysis({ reportType, datasetId, range, createPayload }) {
+export default function usePersistentAnalysis({ reportType, datasetId, storeId, tenantId, range, createPayload }) {
   const [status, setStatus] = useState('idle');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -29,17 +30,15 @@ export default function usePersistentAnalysis({ reportType, datasetId, range, cr
     restoreRef.current = controller;
     setResult(null);
     setError('');
-    if (!datasetId) {
+    if (!datasetId || !storeId) {
       setStatus('idle');
       return () => controller.abort();
     }
 
     setStatus('restoring');
-    const query = new URLSearchParams({ reportType, datasetId, startDate: range.startDate, endDate: range.endDate });
-    fetch(`/api/analysis/latest?${query}`, { signal: controller.signal, cache: 'no-store' })
-      .then(async (response) => {
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `历史分析加载失败（${response.status}）`);
+    const query = new URLSearchParams({ reportType, datasetId, storeId, startDate: range.startDate, endDate: range.endDate });
+    apiFetch(`/api/analysis/latest?${query}`, { signal: controller.signal })
+      .then((body) => {
         if (restoreRef.current !== controller) return;
         setResult(body.result || null);
         setStatus(body.result ? 'success' : 'idle');
@@ -50,7 +49,7 @@ export default function usePersistentAnalysis({ reportType, datasetId, range, cr
         setStatus('error');
       });
     return () => controller.abort();
-  }, [reportType, datasetId, range.startDate, range.endDate]);
+  }, [reportType, datasetId, storeId, range.startDate, range.endDate]);
 
   useEffect(() => () => {
     generationRef.current?.abort();
@@ -66,12 +65,11 @@ export default function usePersistentAnalysis({ reportType, datasetId, range, cr
     setStatus('loading');
     setError('');
     try {
-      const response = await fetch('/api/analysis', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadFactoryRef.current()), signal: controller.signal,
+      const body = await apiFetch('/api/analysis', {
+        method: 'POST',
+        body: JSON.stringify({ ...payloadFactoryRef.current(), storeId }),
+        signal: controller.signal,
       });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || `分析请求失败（${response.status}）`);
       if (!body.analysis || typeof body.analysis !== 'string') throw new Error('服务端未返回有效分析，请重试。');
       if (!body.persisted || !body.id || !body.version || !body.generatedAt) throw new Error('分析结果未确认保存，请重试。');
       if (generationRef.current !== controller) return;
@@ -89,16 +87,14 @@ export default function usePersistentAnalysis({ reportType, datasetId, range, cr
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/config', { signal: controller.signal, cache: 'no-store' })
-      .then(async (response) => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error || 'Agent 配置读取失败');
+    apiFetch('/api/config', { signal: controller.signal })
+      .then((body) => {
         setAgentName(body.model || '分析 Agent');
         setAgentTimeout(Math.min((Number(body.timeoutSeconds) || 180) + 10, 610));
       })
       .catch(() => {});
     return () => controller.abort();
-  }, []);
+  }, [tenantId]);
 
   return { status, result, error, analyze, agentName };
 }

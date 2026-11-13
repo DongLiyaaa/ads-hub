@@ -19,6 +19,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY db ./db
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /home/node/.codex && chown node:node /home/node/.codex
 USER node
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

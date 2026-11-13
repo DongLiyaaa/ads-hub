@@ -102,10 +102,10 @@ function WorstKeywords({ items }) {
   );
 }
 
-export default function AiAnalysis({ snapshot, range, datasetId }) {
+export default function AiAnalysis({ snapshot, range, datasetId, storeId, tenantId }) {
   const [activeTab, setActiveTab] = useState('ai');
   const { status, result, error, analyze, agentName } = usePersistentAnalysis({
-    reportType: 'search-share', datasetId, range,
+    reportType: 'search-share', datasetId, storeId, tenantId, range,
     createPayload: () => createModelPayload(snapshot, range, datasetId),
   });
   const startAnalysis = () => { setActiveTab('ai'); analyze(); };

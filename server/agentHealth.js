@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { getCodexCliPath, isCodexCliAvailable, runCodexAnalysis } from './codex.js';
+import { getCodexOAuthStatus } from './codexOAuth.js';
 import { getClaudeCodePath, isClaudeCodeAvailable, runClaudeCodeAnalysis } from './claude.js';
 
 export function isAgentAvailable(agentType) {
@@ -57,10 +58,25 @@ export async function checkAgentConnection(configuration) {
     return { ...result, agentType: configuration.agentType, checkedAt: new Date().toISOString() };
   }
 
-  checks.push({
-    id: 'auth', label: '认证配置', status: 'success',
-    detail: configuration.apiKey ? `使用已保存密钥 ${configuration.apiKeyHint || '••••'}` : '未保存密钥，将使用 CLI 已有登录或免认证服务',
-  });
+  if (configuration.agentType === 'codex' && configuration.authMethod === 'oauth') {
+    const oauth = await getCodexOAuthStatus();
+    checks.push({
+      id: 'auth', label: '认证配置', status: oauth.loggedIn ? 'success' : 'error',
+      detail: oauth.loggedIn
+        ? 'ChatGPT OAuth 已登录'
+        : oauth.status === 'error' ? 'OAuth 登录状态检查失败，请重新打开设置页或重试登录' : '尚未完成 ChatGPT OAuth 登录',
+    });
+    if (!oauth.loggedIn) {
+      checks.push({ id: 'model', label: '模型连通性', status: 'skipped', detail: '未登录，未发送模型请求' });
+      const result = { status: 'error', message: '请先完成 Codex OAuth 登录', durationMs: Date.now() - startedAt, checks };
+      return { ...result, agentType: configuration.agentType, checkedAt: new Date().toISOString() };
+    }
+  } else {
+    checks.push({
+      id: 'auth', label: '认证配置', status: 'success',
+      detail: configuration.apiKey ? `使用已保存密钥 ${configuration.apiKeyHint || '••••'}` : '未保存密钥，将使用 CLI 已有登录或免认证服务',
+    });
+  }
   try {
     const generated = configuration.agentType === 'claude-code'
       ? await runClaudeCodeAnalysis({}, configuration, true)

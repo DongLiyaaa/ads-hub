@@ -1,4 +1,5 @@
 import { pool } from './db.js';
+import { requireStoreAccess } from './tenancy.js';
 
 export const REPORT_TYPES = new Set(['search-share', 'placement', 'purchased-product']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -12,21 +13,26 @@ export class ReportDataError extends Error {
   }
 }
 
-function datasetPayload(dataset, rows) {
+function datasetPayload(dataset, rows, store) {
   return {
     ...dataset.metadata,
     datasetId: dataset.id,
     importedAt: dataset.imported_at,
     totalRows: dataset.row_count,
+    storeId: store.id,
+    storeName: store.name,
+    storeCode: store.code,
+    site: store.site,
     rows,
   };
 }
 
-export async function getReportPayload(reportType) {
+export async function getReportPayload(auth, reportType, storeId) {
   if (!REPORT_TYPES.has(reportType)) throw new ReportDataError('未知报表类型', 404);
+  const store = await requireStoreAccess(auth, storeId);
   const { rows: datasets } = await pool.query(
-    'SELECT * FROM report_datasets WHERE report_type = $1 ORDER BY imported_at DESC, id DESC LIMIT 1',
-    [reportType],
+    'SELECT * FROM report_datasets WHERE tenant_id = $1 AND store_id = $2 AND report_type = $3 ORDER BY imported_at DESC, id DESC LIMIT 1',
+    [auth.tenant.id, store.id, reportType],
   );
   const dataset = datasets[0];
   if (!dataset) throw new ReportDataError('当前报表尚未导入数据库', 404);
@@ -54,7 +60,7 @@ export async function getReportPayload(reportType) {
       '广告成本销售比(ACOS)': row.acos,
       '投入产出比(ROAS)': row.roas,
       '7天的转化率': row.cvr,
-    })));
+    })), store);
   }
 
   if (reportType === 'placement') {
@@ -72,7 +78,7 @@ export async function getReportPayload(reportType) {
       sales: Number(row.sales),
       orders: Number(row.orders),
       units: Number(row.units),
-    })));
+    })), store);
   }
 
   const { rows } = await pool.query('SELECT * FROM purchased_product_rows WHERE dataset_id = $1 ORDER BY source_row', [dataset.id]);
@@ -90,20 +96,21 @@ export async function getReportPayload(reportType) {
     units: Number(row.units),
     orders: Number(row.orders),
     sales: Number(row.sales),
-  })));
+  })), store);
 }
 
-export async function getAnalysisDataset(payload) {
+export async function getAnalysisDataset(auth, payload) {
   if (!REPORT_TYPES.has(payload?.reportType) || !UUID_PATTERN.test(payload?.datasetId || '')) {
     throw new ReportDataError('缺少有效的报表类型或数据集版本');
   }
+  const store = await requireStoreAccess(auth, payload?.storeId);
   const { startDate, endDate } = payload.range || {};
   if (!DATE_PATTERN.test(startDate || '') || !DATE_PATTERN.test(endDate || '') || endDate < startDate) {
     throw new ReportDataError('分析时间范围无效');
   }
   const { rows } = await pool.query(
-    'SELECT * FROM report_datasets WHERE id = $1 AND report_type = $2',
-    [payload.datasetId, payload.reportType],
+    'SELECT * FROM report_datasets WHERE id = $1 AND tenant_id = $2 AND store_id = $3 AND report_type = $4',
+    [payload.datasetId, auth.tenant.id, store.id, payload.reportType],
   );
   const dataset = rows[0];
   if (!dataset) throw new ReportDataError('数据集版本不存在或报表类型不匹配', 404);

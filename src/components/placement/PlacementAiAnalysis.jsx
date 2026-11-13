@@ -58,10 +58,10 @@ function CandidateTable({ items, type }) {
   );
 }
 
-export default function PlacementAiAnalysis({ snapshot, range, datasetId }) {
+export default function PlacementAiAnalysis({ snapshot, range, datasetId, storeId, tenantId }) {
   const [activeTab, setActiveTab] = useState('ai');
   const { status, result, error, analyze, agentName } = usePersistentAnalysis({
-    reportType: 'placement', datasetId, range,
+    reportType: 'placement', datasetId, storeId, tenantId, range,
     createPayload: () => createPlacementModelPayload(snapshot, range, datasetId),
   });
   const startAnalysis = () => { setActiveTab('ai'); analyze(); };

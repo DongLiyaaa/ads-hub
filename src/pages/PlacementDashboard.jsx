@@ -11,35 +11,26 @@ import PlacementTrendChart from '../components/placement/PlacementTrendChart.jsx
 import { buildPlacementAnalysisSnapshot } from '../lib/placementAnalysis.js';
 import { filterPlacementRows, preparePlacementData, summarizePlacements } from '../lib/placementData.js';
 import { formatCompact, formatCurrency, formatNumber, formatPercent } from '../lib/data.js';
+import useReportData from '../hooks/useReportData.js';
 
 const money = (value) => value == null ? '—' : formatCurrency(value);
 const multiple = (value) => value == null ? '—' : `${value.toFixed(2)}×`;
 
-export default function PlacementDashboard() {
-  const [data, setData] = useState(null);
+function preparePlacement(payload) {
+  const prepared = { ...preparePlacementData(payload), datasetId: payload.datasetId, storeCode: payload.storeCode };
+  if (!prepared.rows.length) throw new Error('当前店铺没有可展示的有效广告位数据');
+  return prepared;
+}
+
+export default function PlacementDashboard({ session, storeId, onStoreChange, onSwitchTenant, onLogout }) {
+  const { data, error, cacheInfo, refresh } = useReportData({
+    reportType: 'placement', userId: session.user.id, tenantId: session.currentTenant.id, storeId, prepare: preparePlacement,
+  });
   const [range, setRange] = useState(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadData() {
-      try {
-        const response = await fetch('/api/reports/placement');
-        if (!response.ok) throw new Error(`广告位数据加载失败（${response.status}）`);
-        const payload = await response.json();
-        const prepared = { ...preparePlacementData(payload), datasetId: payload.datasetId };
-        if (!prepared.rows.length) throw new Error('广告位文件中没有可展示的有效数据');
-        if (!cancelled) {
-          setData(prepared);
-          setRange({ startDate: prepared.minDate, endDate: prepared.maxDate });
-        }
-      } catch (loadError) {
-        if (!cancelled) setError(loadError.message || '广告位数据加载失败，请稍后重试');
-      }
-    }
-    loadData();
-    return () => { cancelled = true; };
-  }, []);
+    setRange(data ? { startDate: data.minDate, endDate: data.maxDate } : null);
+  }, [data]);
 
   const filteredRows = useMemo(() => data && range
     ? filterPlacementRows(data.rows, range.startDate, range.endDate)
@@ -50,13 +41,19 @@ export default function PlacementDashboard() {
   const { summary, placements } = useMemo(() => summarizePlacements(filteredRows), [filteredRows]);
   const snapshot = useMemo(() => buildPlacementAnalysisSnapshot(filteredRows), [filteredRows]);
 
-  if (error) return <main className="status-screen"><div className="status-card"><span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><button type="button" className="primary-button" onClick={() => window.location.reload()}><RefreshCw size={16} aria-hidden="true" />重新加载</button></div></main>;
+  if (error) return <AppShell page="placement" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}><main className="dashboard"><section className="panel empty-workspace" role="alert"><span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新加载</button></section></main></AppShell>;
   if (!data || !range) return <main className="status-screen" aria-live="polite"><div className="loading-content"><Brand /><span className="loading-spinner" aria-hidden="true" /><p>正在整理广告位数据…</p></div></main>;
 
   return (
     <AppShell
       page="placement"
-      reportContext="US11 · 商品推广"
+      session={session}
+      storeId={storeId}
+      onStoreChange={onStoreChange}
+      onSwitchTenant={onSwitchTenant}
+      onLogout={onLogout}
+      onRefresh={refresh}
+      cacheInfo={cacheInfo}
       dateProps={{
         minDate: data.minDate,
         maxDate: data.maxDate,
@@ -78,7 +75,7 @@ export default function PlacementDashboard() {
           <StatCard icon={Percent} label="综合 ACOS" value={formatPercent(summary.acos)} rawValue={formatPercent(summary.acos)} note={`总展示 ${formatCompact(summary.impressions)} · 总点击 ${formatNumber(summary.clicks)}`} />
         </section>
 
-        <PlacementAiAnalysis snapshot={snapshot} range={range} datasetId={data.datasetId} />
+        <PlacementAiAnalysis snapshot={snapshot} range={range} datasetId={data.datasetId} storeId={storeId} tenantId={session.currentTenant.id} />
         <div className="charts-grid placement-charts-grid">
           <PlacementTrendChart dailyRows={snapshot.daily} dates={filteredDates} />
           <PlacementStructureChart placements={placements} />
@@ -88,7 +85,7 @@ export default function PlacementDashboard() {
         <PlacementCampaignTable rows={snapshot.campaigns} summary={summary} startDate={range.startDate} endDate={range.endDate} />
 
         <footer className="dashboard-footer">
-          <p>演示数据：US11 商品推广广告位报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p>
+          <p>演示数据：{data.storeCode} 商品推广广告位报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p>
           <p>日期＋广告组合＋广告活动＋广告位为原始粒度；订单、销售额与销售量为7天归因，比率由汇总基础字段重算。</p>
         </footer>
       </main>

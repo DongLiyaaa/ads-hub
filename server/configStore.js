@@ -49,6 +49,7 @@ function publicConfig(row) {
     model: row.model,
     wireApi: row.wire_api,
     timeoutSeconds: row.timeout_seconds,
+    authMethod: row.agent_type === 'codex' ? (row.auth_method || 'api_key') : 'api_key',
     hasApiKey: Boolean(row.api_key_encrypted),
     apiKeyHint: row.api_key_hint,
     revision: row.revision,
@@ -78,42 +79,45 @@ function validateInput(agentType, input) {
   if (input.protocol !== PROTOCOLS[agentType]) throw new AgentConfigError('Agent 与模型协议不匹配');
   const model = String(input.model || '').trim();
   const apiKey = input.apiKey == null ? '' : String(input.apiKey).trim();
+  const authMethod = agentType === 'codex' ? (input.authMethod || 'api_key') : 'api_key';
   const wireApi = input.wireApi || 'responses';
   const timeoutSeconds = Number(input.timeoutSeconds || 180);
+  if (!['api_key', 'oauth'].includes(authMethod)) throw new AgentConfigError('Codex 认证方式无效');
+  if (agentType !== 'codex' && input.authMethod && input.authMethod !== 'api_key') throw new AgentConfigError('Claude Code 仅支持 API Key 认证');
   if (model.length > 200) throw new AgentConfigError('模型名称过长');
   if (apiKey.length > 4096 || apiKey.includes('\u0000')) throw new AgentConfigError('API Key 格式无效');
   if (wireApi !== 'responses') throw new AgentConfigError('当前 Codex CLI 仅支持 Responses API');
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 15 || timeoutSeconds > 600) throw new AgentConfigError('超时时间需在 15–600 秒之间');
-  return { baseUrl: validateUrl(String(input.baseUrl || '').trim()), model, apiKey, wireApi, timeoutSeconds, clearApiKey: input.clearApiKey === true };
+  return { baseUrl: validateUrl(String(input.baseUrl || '').trim()), model, apiKey, authMethod, wireApi, timeoutSeconds, clearApiKey: input.clearApiKey === true };
 }
 
-export async function getAgentSettings() {
+export async function getAgentSettings(tenantId) {
   const [{ rows: preferenceRows }, { rows }] = await Promise.all([
-    pool.query('SELECT active_agent FROM agent_preferences WHERE id = true'),
-    pool.query('SELECT * FROM agent_configurations ORDER BY agent_type'),
+    pool.query('SELECT active_agent FROM agent_preferences WHERE tenant_id = $1', [tenantId]),
+    pool.query('SELECT * FROM agent_configurations WHERE tenant_id = $1 ORDER BY agent_type', [tenantId]),
   ]);
   return { activeAgent: preferenceRows[0]?.active_agent || 'codex', configs: rows.map(publicConfig) };
 }
 
-export async function getActiveAgentConfig(agentType) {
+export async function getActiveAgentConfig(tenantId, agentType) {
   let selected = agentType;
   if (!selected) {
-    const { rows } = await pool.query('SELECT active_agent FROM agent_preferences WHERE id = true');
+    const { rows } = await pool.query('SELECT active_agent FROM agent_preferences WHERE tenant_id = $1', [tenantId]);
     selected = rows[0]?.active_agent || 'codex';
   }
   if (!AGENT_TYPES.has(selected)) throw new AgentConfigError('Agent 类型无效');
-  const { rows } = await pool.query('SELECT * FROM agent_configurations WHERE agent_type = $1', [selected]);
+  const { rows } = await pool.query('SELECT * FROM agent_configurations WHERE tenant_id = $1 AND agent_type = $2', [tenantId, selected]);
   if (!rows[0]) throw new AgentConfigError('Agent 配置不存在', 404);
-  return { ...publicConfig(rows[0]), apiKey: decryptSecret(rows[0].api_key_encrypted) };
+  return { ...publicConfig(rows[0]), tenantId, apiKey: decryptSecret(rows[0].api_key_encrypted) };
 }
 
-export async function saveAgentSettings(activeAgent, input) {
+export async function saveAgentSettings(tenantId, activeAgent, input) {
   if (!AGENT_TYPES.has(activeAgent)) throw new AgentConfigError('当前 Agent 类型无效');
   const config = validateInput(activeAgent, input);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows } = await client.query('SELECT * FROM agent_configurations WHERE agent_type = $1 FOR UPDATE', [activeAgent]);
+    const { rows } = await client.query('SELECT * FROM agent_configurations WHERE tenant_id = $1 AND agent_type = $2 FOR UPDATE', [tenantId, activeAgent]);
     const previous = rows[0];
     if (!previous) throw new AgentConfigError('Agent 配置不存在', 404);
     let encrypted = previous.api_key_encrypted;
@@ -127,15 +131,16 @@ export async function saveAgentSettings(activeAgent, input) {
     }
     const { rows: updated } = await client.query(
       `UPDATE agent_configurations SET
-        base_url = $2, model = $3, wire_api = $4, timeout_seconds = $5,
-        api_key_encrypted = $6, api_key_hint = $7, revision = revision + 1, updated_at = now(),
+        base_url = $3, model = $4, wire_api = $5, timeout_seconds = $6,
+        api_key_encrypted = $7, api_key_hint = $8, auth_method = $9,
+        revision = revision + 1, updated_at = now(),
         last_check_status = NULL, last_check_message = NULL, last_check_at = NULL, last_check_duration_ms = NULL
-      WHERE agent_type = $1 RETURNING *`,
-      [activeAgent, config.baseUrl, config.model, config.wireApi, config.timeoutSeconds, encrypted, hint],
+      WHERE tenant_id = $1 AND agent_type = $2 RETURNING *`,
+      [tenantId, activeAgent, config.baseUrl, config.model, config.wireApi, config.timeoutSeconds, encrypted, hint, config.authMethod],
     );
     await client.query(
-      'INSERT INTO agent_preferences (id, active_agent, updated_at) VALUES (true, $1, now()) ON CONFLICT (id) DO UPDATE SET active_agent = EXCLUDED.active_agent, updated_at = now()',
-      [activeAgent],
+      'INSERT INTO agent_preferences (tenant_id, active_agent, updated_at) VALUES ($1, $2, now()) ON CONFLICT (tenant_id) DO UPDATE SET active_agent = EXCLUDED.active_agent, updated_at = now()',
+      [tenantId, activeAgent],
     );
     await client.query('COMMIT');
     return publicConfig(updated[0]);
@@ -147,10 +152,10 @@ export async function saveAgentSettings(activeAgent, input) {
   }
 }
 
-export async function recordAgentCheck(agentType, result) {
+export async function recordAgentCheck(tenantId, agentType, result) {
   await pool.query(
-    `UPDATE agent_configurations SET last_check_status = $2, last_check_message = $3,
-      last_check_at = now(), last_check_duration_ms = $4 WHERE agent_type = $1`,
-    [agentType, result.status, result.message, result.durationMs],
+    `UPDATE agent_configurations SET last_check_status = $3, last_check_message = $4,
+      last_check_at = now(), last_check_duration_ms = $5 WHERE tenant_id = $1 AND agent_type = $2`,
+    [tenantId, agentType, result.status, result.message, result.durationMs],
   );
 }

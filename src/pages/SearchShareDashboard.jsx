@@ -15,32 +15,23 @@ import {
   prepareData,
 } from '../lib/data.js';
 import { buildAnalysisSnapshot } from '../lib/analysis.js';
+import useReportData from '../hooks/useReportData.js';
 
-export default function SearchShareDashboard() {
-  const [data, setData] = useState(null);
+function prepareSearchShare(payload) {
+  const prepared = { ...prepareData(payload.rows), datasetId: payload.datasetId, totalRows: payload.totalRows, storeCode: payload.storeCode };
+  if (!prepared.entries.length) throw new Error('当前店铺没有可展示的有效搜索词数据');
+  return prepared;
+}
+
+export default function SearchShareDashboard({ session, storeId, onStoreChange, onSwitchTenant, onLogout }) {
+  const { data, error, cacheInfo, refresh } = useReportData({
+    reportType: 'search-share', userId: session.user.id, tenantId: session.currentTenant.id, storeId, prepare: prepareSearchShare,
+  });
   const [range, setRange] = useState(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadData() {
-      try {
-        const response = await fetch('/api/reports/search-share');
-        if (!response.ok) throw new Error(`数据加载失败（${response.status}）`);
-        const payload = await response.json();
-        const prepared = { ...prepareData(payload.rows), datasetId: payload.datasetId };
-        if (!prepared.entries.length) throw new Error('CSV 中没有可展示的有效数据');
-        if (!cancelled) {
-          setData(prepared);
-          setRange({ startDate: prepared.minDate, endDate: prepared.maxDate });
-        }
-      } catch (loadError) {
-        if (!cancelled) setError(loadError.message || '数据加载失败，请稍后重试');
-      }
-    }
-    loadData();
-    return () => { cancelled = true; };
-  }, []);
+    setRange(data ? { startDate: data.minDate, endDate: data.maxDate } : null);
+  }, [data]);
 
   const filteredEntries = useMemo(() => {
     if (!data || !range) return [];
@@ -67,14 +58,14 @@ export default function SearchShareDashboard() {
 
   if (error) {
     return (
-      <main className="status-screen">
-        <div className="status-card">
+      <AppShell page="search-share" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}>
+        <main className="dashboard"><section className="panel empty-workspace" role="alert">
           <span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span>
           <h1>看板暂时无法加载</h1>
           <p>{error}</p>
-          <button type="button" className="primary-button" onClick={() => window.location.reload()}><RefreshCw size={16} />重新加载</button>
-        </div>
-      </main>
+          <button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} />重新加载</button>
+        </section></main>
+      </AppShell>
     );
   }
 
@@ -91,7 +82,13 @@ export default function SearchShareDashboard() {
   return (
     <AppShell
       page="search-share"
-      reportContext="US1 · 商品推广"
+      session={session}
+      storeId={storeId}
+      onStoreChange={onStoreChange}
+      onSwitchTenant={onSwitchTenant}
+      onLogout={onLogout}
+      onRefresh={refresh}
+      cacheInfo={cacheInfo}
       dateProps={{
         minDate: data.minDate,
         maxDate: data.maxDate,
@@ -116,7 +113,7 @@ export default function SearchShareDashboard() {
           <StatCard icon={Type} label="搜索词数" value={formatNumber(summary.keywordCount)} rawValue={formatNumber(summary.keywordCount)} note={`覆盖 ${filteredDates.length} 天数据`} />
         </section>
 
-        <AiAnalysis snapshot={analysisSnapshot} range={range} datasetId={data.datasetId} />
+        <AiAnalysis snapshot={analysisSnapshot} range={range} datasetId={data.datasetId} storeId={storeId} tenantId={session.currentTenant.id} />
 
         <div className="charts-grid">
           <TrendChart entries={filteredEntries} dates={filteredDates} topKeywords={data.topKeywords} />
@@ -126,7 +123,7 @@ export default function SearchShareDashboard() {
         <KeywordTable keywords={keywords} startDate={range.startDate} endDate={range.endDate} />
 
         <footer className="dashboard-footer">
-          <p>演示数据：US1 商品推广搜索词展示量份额报告 · 原始 {formatNumber(data.totalRows)} 行{data.skippedRows ? ` · 跳过 ${formatNumber(data.skippedRows)} 行` : ''}</p>
+          <p>演示数据：{data.storeCode} 商品推广搜索词展示量份额报告 · 原始 {formatNumber(data.totalRows)} 行{data.skippedRows ? ` · 跳过 ${formatNumber(data.skippedRows)} 行` : ''}</p>
           <p>同一日期、同一搜索词的份额只计一次；展示量、点击量等指标按广告活动累加。</p>
         </footer>
       </main>

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getCodexHome } from './codexHome.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +82,10 @@ export async function runCodexAnalysis(payload, configuration = {}, selfCheck = 
 
   const workdir = await mkdtemp(path.join(os.tmpdir(), 'sharescope-codex-'));
   const isolatedCodexHome = path.join(workdir, 'codex-home');
-  if (configuration.baseUrl || configuration.apiKey) await mkdir(isolatedCodexHome, { recursive: true });
+  const useOAuth = configuration.authMethod === 'oauth';
+  const useCustomProvider = !useOAuth && Boolean(configuration.baseUrl || configuration.apiKey);
+  if (useCustomProvider) await mkdir(isolatedCodexHome, { recursive: true });
+  if (useOAuth) await mkdir(getCodexHome(configuration.tenantId), { recursive: true, mode: 0o700 });
   const outputPath = path.join(workdir, 'analysis.md');
   const prompt = selfCheck
     ? '这是连通性自检。只回复 OK，不要调用任何工具。'
@@ -93,7 +97,12 @@ export async function runCodexAnalysis(payload, configuration = {}, selfCheck = 
     '-C', workdir, '-o', outputPath,
   ];
   if (configuration.model) args.push('-m', configuration.model);
-  if (configuration.baseUrl || configuration.apiKey) {
+  if (useOAuth) {
+    args.push(
+      '-c', 'model_provider="openai"',
+      '-c', 'cli_auth_credentials_store_mode="file"',
+    );
+  } else if (useCustomProvider) {
     args.push(
       '-c', 'model_provider="sharescope"',
       '-c', 'model_providers.sharescope.name="ShareScope OpenAI Compatible"',
@@ -111,8 +120,9 @@ export async function runCodexAnalysis(payload, configuration = {}, selfCheck = 
         env: {
           ...process.env,
           NO_COLOR: '1',
-          ...(configuration.baseUrl || configuration.apiKey ? { CODEX_HOME: isolatedCodexHome } : {}),
-          ...(configuration.apiKey ? { SHARESCOPE_OPENAI_API_KEY: configuration.apiKey } : {}),
+          ...(useCustomProvider ? { CODEX_HOME: isolatedCodexHome } : {}),
+          ...(useOAuth ? { CODEX_HOME: getCodexHome(configuration.tenantId) } : {}),
+          ...(!useOAuth && configuration.apiKey ? { SHARESCOPE_OPENAI_API_KEY: configuration.apiKey } : {}),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });

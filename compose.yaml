@@ -38,6 +38,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - sharescope-codex-home:/home/node/.codex
       - ${CODEX_HOME:-/Users/dongli/.codex}/auth.json:/mnt/codex/auth.json:ro
       - ${CODEX_HOME:-/Users/dongli/.codex}/config.toml:/mnt/codex/config.toml:ro
     ports:
@@ -47,3 +48,5 @@ services:
 volumes:
   sharescope-postgres-data:
     name: sharescope-postgres-data
+  sharescope-codex-home:
+    name: sharescope-codex-home

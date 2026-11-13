@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CodexCliError, extractModelName, getSystemPrompt } from '../server/codex.js';
+import { parseDeviceAuthOutput } from '../server/codexOAuth.js';
 
 describe('Codex CLI 适配层', () => {
   it('从 CLI 输出中识别实际模型并兼容无模型信息', () => {
@@ -13,6 +14,12 @@ describe('Codex CLI 适配层', () => {
     expect(getSystemPrompt({ reportType: 'placement' })).not.toContain('## 词云结构分析');
     expect(getSystemPrompt({ report: 'US1 商品推广搜索词展示量份额' })).toContain('## 词云结构分析');
     expect(getSystemPrompt({})).not.toContain('## 广告位结构与投入产出');
+  });
+
+  it('从 Codex 设备授权输出提取官方地址和一次性代码', () => {
+    const output = '\u001b[94mhttps://auth.openai.com/codex/device\u001b[0m\nEnter this one-time code\n\u001b[94mABCD-EFGH\u001b[0m';
+    expect(parseDeviceAuthOutput(output)).toEqual({ verificationUrl: 'https://auth.openai.com/codex/device', userCode: 'ABCD-EFGH' });
+    expect(parseDeviceAuthOutput('https://openai.com.example.org/device')).toEqual({ verificationUrl: null, userCode: null });
   });
 
   it('保留可返回给前端的错误状态', () => {

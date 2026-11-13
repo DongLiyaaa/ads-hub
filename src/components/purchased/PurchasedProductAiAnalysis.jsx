@@ -39,10 +39,10 @@ function PathTable({ items }) {
   return <HorizontalScroller className="analysis-table-scroll analysis-table-scroll--tall" label="高销售购买路径表"><table className="analysis-table purchased-path-ai-table"><thead><tr><th>排名</th><th className="align-left">广告投放 ASIN</th><th className="align-left">已购买 ASIN</th><th>销售额</th><th>订单</th><th>路径占比</th><th>活动数</th><th className="align-left">路径判断</th><th className="align-left">建议</th></tr></thead><tbody>{items.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td className="align-left keyword-cell">{item.advertisedAsin}</td><td className="align-left keyword-cell">{item.purchasedAsin}</td><td>{money(item.sales)}</td><td>{formatNumber(item.orders)}</td><td>{formatPercent(item.salesShare)}</td><td>{formatNumber(item.campaignCount)}</td><td className="align-left"><span className="product-role"><Route size={12} aria-hidden="true" />{item.pathRole}</span></td><td className="align-left path-action" title={item.action}>{item.action}</td></tr>)}</tbody></table></HorizontalScroller>;
 }
 
-export default function PurchasedProductAiAnalysis({ snapshot, range, datasetId }) {
+export default function PurchasedProductAiAnalysis({ snapshot, range, datasetId, storeId, tenantId }) {
   const [activeTab, setActiveTab] = useState('ai');
   const { status, result, error, analyze, agentName } = usePersistentAnalysis({
-    reportType: 'purchased-product', datasetId, range,
+    reportType: 'purchased-product', datasetId, storeId, tenantId, range,
     createPayload: () => createPurchasedProductModelPayload(snapshot, range, datasetId),
   });
   const startAnalysis = () => { setActiveTab('ai'); analyze(); };

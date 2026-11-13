@@ -1,4 +1,4 @@
-import { BarChart3, MapPinned, Settings2, ShoppingBag } from 'lucide-react';
+import { BarChart3, Building2, LogOut, MapPinned, RefreshCw, Settings2, ShoppingBag, UsersRound } from 'lucide-react';
 import DateRangeFilter from './DateRangeFilter.jsx';
 
 function GitHubIcon() {
@@ -32,17 +32,16 @@ const REPORTS = [
 export function ContactFooter() {
   return (
     <footer className="contact-footer" aria-label="联系方式">
-      <a href="https://github.com/DongLiyaaa" target="_blank" rel="noreferrer">
-        <GitHubIcon />
-        <span>GitHub：DongLiyaaa</span>
-      </a>
+      <a href="https://github.com/DongLiyaaa" target="_blank" rel="noreferrer"><GitHubIcon /><span>GitHub：DongLiyaaa</span></a>
       <span><WeChatIcon />微信公众号：冬离鸭冬离</span>
       <span><DouyinIcon />抖音号：冬离鸭冬离</span>
     </footer>
   );
 }
 
-export default function AppShell({ page, reportContext, dateProps, children }) {
+export default function AppShell({ page, session, storeId, onStoreChange, onSwitchTenant, onLogout, onRefresh, cacheInfo, reportContext, dateProps, children }) {
+  const isAdmin = session?.currentTenant.role === 'admin';
+  const currentStore = session?.stores.find((store) => store.id === storeId);
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -51,30 +50,40 @@ export default function AppShell({ page, reportContext, dateProps, children }) {
         <nav className="report-nav" aria-label="报表分析导航">
           {REPORTS.map((report, index) => {
             const Icon = report.icon;
-            return (
-              <a key={report.id} href={report.href} className={page === report.id ? 'is-active' : ''} aria-current={page === report.id ? 'page' : undefined}>
-                <span className="report-nav__icon"><Icon size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-                <span className="report-nav__copy"><strong>{report.label}</strong><small>{report.description}</small></span>
-                <span className="report-nav__index" aria-hidden="true">0{index + 1}</span>
-              </a>
-            );
+            return <a key={report.id} href={report.href} className={page === report.id ? 'is-active' : ''} aria-current={page === report.id ? 'page' : undefined}>
+              <span className="report-nav__icon"><Icon size={18} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="report-nav__copy"><strong>{report.label}</strong><small>{report.description}</small></span>
+              <span className="report-nav__index" aria-hidden="true">0{index + 1}</span>
+            </a>;
           })}
         </nav>
         <div className="sidebar-section-label sidebar-section-label--settings">WORKSPACE</div>
         <nav className="report-nav" aria-label="工作区设置">
-          <a href="#/agent-settings" className={page === 'agent-settings' ? 'is-active' : ''} aria-current={page === 'agent-settings' ? 'page' : undefined}>
-            <span className="report-nav__icon"><Settings2 size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className="report-nav__copy"><strong>Agent 与模型</strong><small>执行器、协议与连通性</small></span>
-          </a>
+          {isAdmin ? <>
+            <a href="#/tenant-admin" className={page === 'tenant-admin' ? 'is-active' : ''} aria-current={page === 'tenant-admin' ? 'page' : undefined}>
+              <span className="report-nav__icon"><UsersRound size={18} strokeWidth={1.8} /></span>
+              <span className="report-nav__copy"><strong>租户与权限</strong><small>用户、店铺与访问分配</small></span>
+            </a>
+            <a href="#/agent-settings" className={page === 'agent-settings' ? 'is-active' : ''} aria-current={page === 'agent-settings' ? 'page' : undefined}>
+              <span className="report-nav__icon"><Settings2 size={18} strokeWidth={1.8} /></span>
+              <span className="report-nav__copy"><strong>Agent 与模型</strong><small>执行器、协议与连通性</small></span>
+            </a>
+          </> : null}
         </nav>
-        <div className="sidebar-footer"><span className="sidebar-status-dot" aria-hidden="true" /><span>本地演示环境</span><small>Amazon Ads Analytics</small></div>
+        <div className="sidebar-footer"><span className="sidebar-status-dot" aria-hidden="true" /><span>{isAdmin ? '租户管理员' : '普通用户'} · {session?.user.displayName}</span><small>{session?.currentTenant.name}</small></div>
       </aside>
       <div className="app-workspace">
         <header className="app-header">
           <div className="app-header__inner">
+            <div className="workspace-selectors">
+              <label><Building2 size={15} /><span className="sr-only">当前租户</span><select value={session?.currentTenant.id || ''} onChange={(event) => onSwitchTenant(event.target.value)} disabled={session?.tenants.length <= 1}>{session?.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
+              <label><span className="sr-only">当前店铺</span><select value={storeId || ''} onChange={(event) => onStoreChange(event.target.value)} disabled={!session?.stores.length}><option value="" disabled>请选择店铺</option>{session?.stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.site}</option>)}</select></label>
+            </div>
             <div className="header-actions">
-              <span className="report-context">{reportContext || '本地工作区'}</span>
+              <span className="report-context">{currentStore ? `${currentStore.code} · 商品推广` : reportContext || session?.currentTenant.name}</span>
               {dateProps ? <DateRangeFilter {...dateProps} /> : null}
+              {onRefresh ? <div className="cache-controls"><button type="button" className="icon-button" onClick={onRefresh} title="绕过缓存并重新获取报表" aria-label="刷新报表"><RefreshCw size={16} /></button>{cacheInfo ? <small>{cacheInfo.source === 'cache' ? '已读本地缓存' : '已回源'}{cacheInfo.cacheFailed ? ' · 本次未写入本地缓存' : ' · 缓存 2 小时'}</small> : null}</div> : null}
+              <div className="header-user"><span title={session?.user.email}>{session?.user.displayName}</span><button type="button" className="icon-button" onClick={onLogout} title="退出登录并清除本地报表缓存" aria-label="退出登录"><LogOut size={16} /></button></div>
             </div>
           </div>
         </header>

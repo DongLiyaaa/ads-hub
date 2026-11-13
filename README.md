@@ -10,7 +10,7 @@
 
 # Ads Hub（ShareScope 亚马逊广告报表看板）
 
-当前版本：`0.0.1` · 许可证：MIT · 源码：https://github.com/DongLiyaaa/ads-hub
+当前版本：`0.1.0` · 许可证：MIT · 源码：https://github.com/DongLiyaaa/ads-hub
 
 基于用户提供的亚马逊商品推广报表构建的本地看板。前端使用 React 18 + Vite 6，服务端使用 Node.js + Express 5，报表数据、AI 历史版本和 Agent 配置持久化到 PostgreSQL；AI 综合分析可切换 Codex CLI 或 Claude Code。
 
@@ -161,8 +161,18 @@ npm run build
 | Codex CLI | OpenAI Responses API | 可连接 OpenAI 或支持 Responses 的兼容网关 | 当前锁定的 Codex 0.163.0 已移除 Chat Completions，不支持仅提供 Chat 的服务 |
 | Claude Code | Anthropic Messages API | 使用 Claude Code 原生 Anthropic 协议，默认模型为 `claude-opus-5-5` | OpenAI 服务需先经 Anthropic 协议转换网关 |
 
-- Base URL、模型、接口模式和超时时间保存到 PostgreSQL；每次保存递增配置版本，并清除旧自检状态，避免误用旧结果。
-- API Key 使用 `MODEL_CONFIG_ENCRYPTION_KEY` 进行 AES-256-GCM 加密，只写入、不回显；接口仅返回末四位提示。留空保留旧密钥，也可主动清除。加密密钥丢失后，已保存 API Key 无法恢复。
+Codex CLI 支持两种认证方式：
+
+| 认证方式 | 优势 | 限制 |
+|---|---|---|
+| API Key | 可连接 OpenAI 或自定义 Responses 网关，密钥加密保存 | 需要自行管理密钥，不使用 ChatGPT 账号订阅 |
+| ChatGPT OAuth | 无需填写 API Key，通过设备码完成官方账号授权 | 需要本人在浏览器确认；设备码 15 分钟过期，不使用自定义 Base URL |
+
+选择“ChatGPT OAuth”后点击“开始 OAuth 登录”，打开页面显示的 OpenAI 验证地址并输入一次性设备码。授权完成后页面自动更新登录状态，再点击“保存并启用”即可自检或用于报表分析。开始新登录会替换应用内现有 Codex CLI 凭据，其他同账号 CLI 会话可能需要重新登录，但不会删除数据库中保存的 API Key。访问令牌只由 Codex CLI 写入 Codex Home，不返回浏览器。
+
+- Base URL、模型、接口模式、Codex 认证方式和超时时间保存到 PostgreSQL；每次保存递增配置版本，并清除旧自检状态，避免误用旧结果。
+- API Key 使用 `MODEL_CONFIG_ENCRYPTION_KEY` 进行 AES-256-GCM 加密，只写入、不回显；接口仅返回末四位提示。留空保留旧密钥，也可主动清除。加密密钥丢失后，已保存 API Key 无法恢复。OAuth 启用时保留但不使用已保存密钥，也不会把密钥传给 Codex 子进程。
+- Codex OAuth 使用 CLI 原生 `login --device-auth`，认证状态与登录进度分离；未登录时自检不会发送模型请求。OAuth 使用 OpenAI 官方 provider 和文件凭据存储，自定义 Base URL 不生效。
 - 自检依次检查 CLI 运行时、认证配置和一次最小模型请求；只有点击“检查 Agent 连通性”才调用模型，可能消耗少量额度。最近自检状态、时间和耗时持久化，刷新后保留。
 - 自定义 Codex provider 使用隔离的临时 `CODEX_HOME`，避免加载本机无关插件、MCP 或 ChatGPT 登录；API Key 通过环境变量传给子进程，不进入命令行参数。
 - Claude Code 使用非交互输出、空工具集、空 MCP、无会话持久化和隔离设置来源。容器未挂载整个 `~/.claude`；容器内使用自定义 Anthropic 服务时应配置 API Key。
@@ -187,7 +197,7 @@ docker compose up -d
 
 访问 `http://127.0.0.1:18090/#/placement`。生产镜像基于 Node.js 22，托管静态文件和 API，包含 `@openai/codex` 0.163.0 与 `@anthropic-ai/claude-code` 2.1.323。
 
-Compose 将宿主机 `~/.codex/auth.json` 与 `config.toml` 只读挂载到 `/mnt/codex`，启动脚本再复制到容器内可写的 Codex Home，供未配置自定义服务的 Codex 使用。Claude Code 不挂载宿主机凭据目录，请在设置页保存 API Key。AI 是否可用取决于运行时、凭据和模型服务；确定性表格和透视不依赖模型。
+Compose 将宿主机 `~/.codex/auth.json` 与 `config.toml` 只读挂载到 `/mnt/codex`，启动脚本只在独立 `sharescope-codex-home` 卷首次初始化时导入凭据，避免重启覆盖应用内新完成的 OAuth 登录。后续 OAuth 凭据保存在该命名卷中，容器替换后仍可恢复；Claude Code 不挂载宿主机凭据目录，请在设置页保存 API Key。AI 是否可用取决于运行时、凭据和模型服务；确定性表格和透视不依赖模型。
 
 `.env` 必须设置 `PGPASSWORD` 和 64 位十六进制 `MODEL_CONFIG_ENCRYPTION_KEY`。请勿提交真实密码、API Key 或加密密钥。
 

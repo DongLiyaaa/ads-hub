@@ -6,6 +6,10 @@ import Papa from 'papaparse';
 import { closeDatabase, pool, runMigrations } from '../server/db.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
+const DEFAULT_STORE_ID = '00000000-0000-4000-8000-000000000101';
+const tenantId = process.env.SHARESCOPE_TENANT_ID || DEFAULT_TENANT_ID;
+const storeId = process.env.SHARESCOPE_STORE_ID || (tenantId === DEFAULT_TENANT_ID ? DEFAULT_STORE_ID : '');
 const MONTHS = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
 
 function numberValue(value, fallback = null) {
@@ -37,7 +41,7 @@ async function insertRows(client, table, columns, rows) {
 
 async function importDataset({ reportType, sourceName, buffer, metadata, rows, table, columns }) {
   const sourceSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
-  const existing = await pool.query('SELECT id FROM report_datasets WHERE report_type = $1 AND source_sha256 = $2', [reportType, sourceSha256]);
+  const existing = await pool.query('SELECT id FROM report_datasets WHERE tenant_id = $1 AND store_id = $2 AND report_type = $3 AND source_sha256 = $4', [tenantId, storeId, reportType, sourceSha256]);
   if (existing.rows.length) {
     const count = await pool.query(`SELECT count(*)::int AS count FROM ${table} WHERE dataset_id = $1`, [existing.rows[0].id]);
     if (count.rows[0].count !== rows.length) throw new Error(`${reportType} 已导入记录数不一致`);
@@ -50,9 +54,9 @@ async function importDataset({ reportType, sourceName, buffer, metadata, rows, t
     await client.query('BEGIN');
     const dates = rows.map((row) => row.report_date).sort();
     const { rows: inserted } = await client.query(
-      `INSERT INTO report_datasets (report_type, source_name, source_sha256, metadata, row_count, min_date, max_date)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7) RETURNING id`,
-      [reportType, sourceName, sourceSha256, JSON.stringify(metadata), rows.length, dates[0], dates.at(-1)],
+      `INSERT INTO report_datasets (report_type, source_name, source_sha256, metadata, row_count, min_date, max_date, tenant_id, store_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9) RETURNING id`,
+      [reportType, sourceName, sourceSha256, JSON.stringify(metadata), rows.length, dates[0], dates.at(-1), tenantId, storeId],
     );
     const datasetId = inserted[0].id;
     await insertRows(client, table, columns, rows.map((row) => ({ ...row, dataset_id: datasetId })));
@@ -115,6 +119,9 @@ async function importNormalized(reportType, sourceName) {
 
 try {
   await runMigrations();
+  if (!storeId) throw new Error('导入非默认租户时必须同时设置 SHARESCOPE_STORE_ID');
+  const { rows: stores } = await pool.query('SELECT id FROM stores WHERE id = $1 AND tenant_id = $2 AND active = true', [storeId, tenantId]);
+  if (!stores[0]) throw new Error('目标店铺不存在、已停用或不属于 SHARESCOPE_TENANT_ID');
   await importSearchShare();
   await importNormalized('placement', 'placement-report.json');
   await importNormalized('purchased-product', 'purchased-product-report.json');
