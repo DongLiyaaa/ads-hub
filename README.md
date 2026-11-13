@@ -14,6 +14,20 @@
 
 基于用户提供的亚马逊商品推广报表构建的本地看板。前端使用 React 18 + Vite 6，服务端使用 Node.js + Express 5，报表数据、AI 历史版本和 Agent 配置持久化到 PostgreSQL；AI 综合分析可切换 Codex CLI 或 Claude Code。
 
+## 演示数据（仅本地）
+
+GitHub 源码、标签和 Release 源码包不提供演示报表。演示数据仅保留在本地 `public/data/`，该目录中的数据文件已被 `.gitignore` 排除，请勿提交真实业务数据。
+
+需要自行准备以下文件，再配置 PostgreSQL 并执行 `npm run db:import`：
+
+| 本地路径 | 用途 |
+|---|---|
+| `public/data/search-term-share.csv` | 搜索词展示份额报表 |
+| `public/data/placement-report.json` | 广告位标准数据 |
+| `public/data/purchased-product-report.json` | 已购买商品标准数据 |
+
+未导入数据时，看板会显示空数据或无权限状态，不会自动下载演示数据。
+
 ## 报表入口
 
 - `#/search-share`：搜索词展示份额分析。
