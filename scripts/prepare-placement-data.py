@@ -1,6 +1,6 @@
 """Convert an Amazon SP placement XLSX report into normalized JSON.
 
-Usage: python3 -I scripts/prepare-placement-data.py input.xlsx public/data/placement-report.json
+Usage: python3 -I scripts/prepare-placement-data.py input.xlsx data/local/placement-report.json
 Requires openpyxl. No source workbook is copied into the web application.
 """
 

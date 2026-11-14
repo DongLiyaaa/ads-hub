@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   buildCampaignHierarchy,
@@ -94,9 +94,11 @@ describe('广告位透视和趋势', () => {
   });
 });
 
+const localPlacementReport = new URL('../data/local/placement-report.json', import.meta.url);
+
 describe('真实 Excel 转换结果对账', () => {
-  it('与源文件核实总数一致', () => {
-    const payload = JSON.parse(readFileSync(new URL('../public/data/placement-report.json', import.meta.url), 'utf8'));
+  it.skipIf(!existsSync(localPlacementReport))('与源文件核实总数一致', () => {
+    const payload = JSON.parse(readFileSync(localPlacementReport, 'utf8'));
     const data = preparePlacementData(payload);
     const { summary } = summarizePlacements(data.rows);
     expect(data.rows).toHaveLength(4129);

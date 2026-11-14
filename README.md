@@ -12,21 +12,25 @@
 
 当前版本：`0.1.0` · 许可证：MIT · 源码：https://github.com/DongLiyaaa/ads-hub
 
-基于用户提供的亚马逊商品推广报表构建的本地看板。前端使用 React 18 + Vite 6，服务端使用 Node.js + Express 5，报表数据、AI 历史版本和 Agent 配置持久化到 PostgreSQL；AI 综合分析可切换 Codex CLI 或 Claude Code。
+用于分析亚马逊商品推广报表的自托管工作台，将搜索词展示份额、广告位和已购买商品报表转换为可筛选、可下钻、可持续复盘的分析看板。
 
-## 演示数据（仅本地）
+## 核心功能
 
-GitHub 源码、标签和 Release 源码包不提供演示报表。演示数据仅保留在本地 `public/data/`，该目录中的数据文件已被 `.gitignore` 排除，请勿提交真实业务数据。
+- **三类广告报表看板**：搜索词展示份额、广告位和已购买商品分析，支持筛选、排序、分页及 CSV 导出。
+- **AI 洞察与历史版本**：按数据集和时间范围保存分析结果，重新分析不会覆盖旧版本。
+- **多租户与店铺授权**：区分租户管理员和普通用户，服务端强制校验店铺访问权限。
+- **双 Agent 支持**：可切换 Codex CLI 或 Claude Code，支持连通性自检和 Codex OAuth。
+- **可自托管**：使用 PostgreSQL 持久化，提供 Docker 部署；报表浏览器缓存两小时，不依赖 Redis。
 
-需要自行准备以下文件，再配置 PostgreSQL 并执行 `npm run db:import`：
+## 数据准备
 
-| 本地路径 | 用途 |
-|---|---|
-| `public/data/search-term-share.csv` | 搜索词展示份额报表 |
-| `public/data/placement-report.json` | 广告位标准数据 |
-| `public/data/purchased-product-report.json` | 已购买商品标准数据 |
+使用你自己的亚马逊商品推广报表，仓库不附带业务数据。准备数据并配置 PostgreSQL 后执行：
 
-未导入数据时，看板会显示空数据或无权限状态，不会自动下载演示数据。
+```bash
+npm run db:import
+```
+
+文件命名、格式转换和导入规则见[数据导入指南](docs/data-import.md)。
 
 ## 报表入口
 
@@ -60,7 +64,7 @@ GitHub 源码、标签和 Release 源码包不提供演示报表。演示数据�
 
 ## 广告位报表分析
 
-当前数据来自 `US11商品推广 广告位 报告.xlsx`，覆盖 2022-09-01 至 2022-09-30，标准数据粒度为“日期 + 广告组合 + 广告活动 + 广告位”。三类广告位为搜索首页顶部、搜索结果其余位置和商品页面。
+标准数据粒度为“日期 + 广告组合 + 广告活动 + 广告位”，覆盖搜索首页顶部、搜索结果其余位置和商品页面三类广告位。
 
 - KPI：总花费、7 天总销售额、7 天总订单数、综合 ACOS。
 - 单指标每日趋势：ACOS、花费、销售额、订单、CTR、CVR、CPC、ROAS；缺失日期不补零。
@@ -95,23 +99,9 @@ GitHub 源码、标签和 Release 源码包不提供演示报表。演示数据�
 
 源报告缺少毛利、目标 ACOS、预算、当前广告位溢价、关键词、匹配模式和 ASIN，因此看板不会虚构这些维度。所有候选与 AI 建议仅用于人工复核，不会自动调整广告。
 
-### 重建广告位 JSON
-
-前置条件：Python 环境已安装 `openpyxl`。在项目根目录执行：
-
-```bash
-python3 -I scripts/prepare-placement-data.py \
-  "/Users/dongli/Downloads/US11商品推广 广告位 报告.xlsx" \
-  public/data/placement-report.json
-```
-
-脚本校验必要字段、日期、三类广告位、单一 USD 币种和重复粒度，并输出标准化 JSON。原始 XLSX 不会复制到 Web 公共目录。替换 JSON 后需重新构建前端或 Docker 镜像。
-
-搜索词源数据位于 `public/data/search-term-share.csv`，字段名需与当前亚马逊报告一致。
-
 ## 已购买商品报表分析
 
-当前数据来自 `US11商品推广 已购买商品 报告.xlsx`，覆盖 2022-09-01 至 2022-09-30，共 2,711 条标准数据行。页面将“广告投放 ASIN”和“已购买 ASIN”分开分析，避免把引流能力误当成购买商品自身的直接投放效率。
+页面将“广告投放 ASIN”和“已购买 ASIN”分开分析，避免把引流能力误当成购买商品自身的直接投放效率。
 
 - KPI：7 天内其他 SKU 销售额、订单数、销售量、广告 ASIN → 购买 ASIN 路径数。
 - 每日趋势：整体与销售额 Top 3 购买 ASIN 的销售额、订单或销售量；缺失日期不补零。
@@ -129,20 +119,9 @@ python3 -I scripts/prepare-placement-data.py \
 | 购买路径 | 按 Advertised ASIN + Purchased ASIN 汇总 | 哪些商品组合产生较高归因销售 | 是否同父体、是否应直接迁移预算 |
 
 - 销售额、订单和销售量均保留源报告的“7 天内其他 SKU”口径；不能将其解释为账户完整 Same-ASIN / Cross-ASIN 报告。
-- 当前非零记录中广告 ASIN 均不等于购买 ASIN，但这只描述本源文件，不能推断账户整体跨 ASIN 占比。
 - 购买 ASIN 销售占比 = 该购买 ASIN 其他 SKU 销售额 / 当前范围其他 SKU 销售额；路径占比同理。
 - “承接中心候选”“被动承接候选”“引流入口候选”等均为确定性候选标签，不是投放或盈利结论。
 - 缺少 Spend、Clicks、Impressions、Purchased SKU、父子 ASIN 映射、利润、库存和购买 ASIN 直接投放效率，因此不计算 ACOS、CPO、CVR、CTR，不判断同父体，也不自动迁移预算。
-
-### 重建已购买商品 JSON
-
-```bash
-python3 -I scripts/prepare-purchased-product-data.py \
-  "/Users/dongli/Downloads/US11商品推广 已购买商品 报告.xlsx" \
-  public/data/purchased-product-report.json
-```
-
-脚本保留零值行以维持日期覆盖，商品和路径聚合只使用有购买指标的行；同时校验必要字段、日期、USD 币种和重复粒度。原始 XLSX 不会复制到 Web 公共目录。
 
 ## 本地开发
 

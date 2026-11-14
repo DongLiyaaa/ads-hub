@@ -73,7 +73,7 @@ async function importDataset({ reportType, sourceName, buffer, metadata, rows, t
 
 async function importSearchShare() {
   const sourceName = 'search-term-share.csv';
-  const buffer = await readFile(path.join(root, 'public/data', sourceName));
+  const buffer = await readFile(path.join(root, 'data/local', sourceName));
   const parsed = Papa.parse(buffer.toString('utf8'), { header: true, skipEmptyLines: 'greedy' });
   if (parsed.errors.some((item) => item.type === 'Delimiter')) throw new Error('搜索词 CSV 分隔符解析失败');
   const rows = parsed.data.map((row, index) => ({
@@ -98,7 +98,7 @@ async function importSearchShare() {
 }
 
 async function importNormalized(reportType, sourceName) {
-  const buffer = await readFile(path.join(root, 'public/data', sourceName));
+  const buffer = await readFile(path.join(root, 'data/local', sourceName));
   const payload = JSON.parse(buffer.toString('utf8'));
   const { rows, ...metadata } = payload;
   const table = reportType === 'placement' ? 'placement_rows' : 'purchased_product_rows';
