@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ArrowRight, LoaderCircle, LockKeyhole } from 'lucide-react';
+import { ArrowRight, FlaskConical, LoaderCircle, LockKeyhole } from 'lucide-react';
 import { Brand, ContactFooter } from '../components/AppShell.jsx';
 import { apiFetch } from '../lib/api.js';
 
 export default function LoginPage({ needsSetup, onAuthenticated }) {
   const [form, setForm] = useState({ displayName: '', workspaceName: '我的广告工作区', email: '', password: '', confirmPassword: '' });
   const [busy, setBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const [error, setError] = useState('');
   const update = (field, value) => setForm((previous) => ({ ...previous, [field]: value }));
 
@@ -21,6 +22,19 @@ export default function LoginPage({ needsSetup, onAuthenticated }) {
       setError(requestError.message || '登录失败，请稍后重试');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const enterDemo = async () => {
+    setError('');
+    setDemoBusy(true);
+    try {
+      await apiFetch('/api/auth/demo', { method: 'POST', body: JSON.stringify({}) });
+      await onAuthenticated();
+    } catch (requestError) {
+      setError(requestError.message || 'Demo 暂时无法进入，请稍后重试');
+    } finally {
+      setDemoBusy(false);
     }
   };
 
@@ -42,8 +56,11 @@ export default function LoginPage({ needsSetup, onAuthenticated }) {
             <label className="settings-field"><span className="settings-field__label">密码</span><input type="password" value={form.password} onChange={(event) => update('password', event.target.value)} required minLength={12} maxLength={128} autoComplete={needsSetup ? 'new-password' : 'current-password'} /></label>
             {needsSetup ? <label className="settings-field"><span className="settings-field__label">确认密码</span><input type="password" value={form.confirmPassword} onChange={(event) => update('confirmPassword', event.target.value)} required minLength={12} maxLength={128} autoComplete="new-password" /></label> : null}
             {error ? <div className="settings-message settings-message--error" role="alert">{error}</div> : null}
-            <button className="primary-button auth-submit" type="submit" disabled={busy}>{busy ? <LoaderCircle size={17} className="spin" /> : <ArrowRight size={17} />}{busy ? '正在验证…' : needsSetup ? '创建并进入工作区' : '登录'}</button>
+            <button className="primary-button auth-submit" type="submit" disabled={busy || demoBusy}>{busy ? <LoaderCircle size={17} className="spin" /> : <ArrowRight size={17} />}{busy ? '正在验证…' : needsSetup ? '创建并进入正式工作区' : '登录正式工作区'}</button>
           </form>
+          <div className="auth-divider"><span>无需账号，直接体验</span></div>
+          <button className="secondary-button auth-submit auth-demo" type="button" onClick={enterDemo} disabled={busy || demoBusy}>{demoBusy ? <LoaderCircle size={17} className="spin" /> : <FlaskConical size={17} />}{demoBusy ? '正在准备 Demo…' : '进入 Demo 演示环境'}</button>
+          <p className="auth-demo-note">Demo 数据与正式工作区完全隔离；报表共享只读，每位访客的 AI 对话独立保存。</p>
           <small className="auth-security">密码至少 12 个字符。登录会话使用 HttpOnly Cookie，不写入浏览器报表缓存。</small>
         </section>
       </main>

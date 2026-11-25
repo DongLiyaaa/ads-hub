@@ -80,16 +80,17 @@ export default function AppShell({ page, session, storeId, onStoreChange, onSwit
             <span className="report-nav__copy"><strong>Skill 管理</strong><small>私有创建、授权与加载</small></span>
           </a>
         </nav>
-        <div className="sidebar-footer"><span className="sidebar-status-dot" aria-hidden="true" /><span>{isAdmin ? '租户管理员' : '普通用户'} · {session?.user.displayName}</span><small>{session?.currentTenant.name}</small></div>
+        <div className="sidebar-footer"><span className="sidebar-status-dot" aria-hidden="true" /><span>{isAdmin ? '租户管理员' : session?.currentTenant.environment === 'demo' ? 'Demo 访客' : '普通用户'} · {session?.user.displayName}</span><small>{session?.currentTenant.name}</small></div>
       </aside>
       <div className="app-workspace">
         <header className="app-header">
           <div className="app-header__inner">
             <div className="workspace-selectors">
-              <label><Building2 size={15} /><span className="sr-only">当前租户</span><select value={session?.currentTenant.id || ''} onChange={(event) => onSwitchTenant(event.target.value)} disabled={session?.tenants.length <= 1}>{session?.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
+              <label><Building2 size={15} /><span className="sr-only">当前租户</span><select value={session?.currentTenant.id || ''} onChange={(event) => onSwitchTenant(event.target.value)} disabled={session?.tenants.length <= 1}>{session?.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}{tenant.environment === 'demo' ? '（Demo）' : ''}</option>)}</select></label>
               <label><span className="sr-only">当前店铺＋站点</span><select value={storeId || ''} onChange={(event) => onStoreChange(event.target.value)} disabled={!session?.stores.length}><option value="" disabled>请选择店铺＋站点</option>{session?.stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.code} · {store.site}</option>)}</select></label>
             </div>
             <div className="header-actions">
+              <span className={`environment-label${session?.currentTenant.environment === 'demo' ? ' is-demo' : ''}`}>{session?.currentTenant.environment === 'demo' ? 'Demo 演示环境' : '正式环境'}</span>
               <span className="report-context">{currentStore ? `${currentStore.code} · ${currentStore.site} · 商品推广` : reportContext || session?.currentTenant.name}</span>
               {dateProps ? <DateRangeFilter {...dateProps} /> : null}
               {onRefresh ? <div className="cache-controls"><button type="button" className="icon-button" onClick={onRefresh} title="绕过缓存并重新获取报表" aria-label="刷新报表"><RefreshCw size={16} /></button>{cacheInfo ? <small>{cacheInfo.source === 'cache' ? '已读本地缓存' : '已回源'}{cacheInfo.cacheFailed ? ' · 本次未写入本地缓存' : ' · 缓存 2 小时'}</small> : null}</div> : null}

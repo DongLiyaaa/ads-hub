@@ -133,14 +133,26 @@ function summarizePurchased(payload, range) {
   };
 }
 
+export function getPreviousChatRange(range) {
+  const start = Date.parse(`${range.startDate}T00:00:00Z`);
+  const end = Date.parse(`${range.endDate}T00:00:00Z`);
+  const days = Math.round((end - start) / 86400000) + 1;
+  const previousStart = new Date(start - days * 86400000).toISOString().slice(0, 10);
+  const previousEnd = new Date(start - 86400000).toISOString().slice(0, 10);
+  return { startDate: previousStart, endDate: previousEnd };
+}
+
 export async function buildChatData(auth, input) {
   const range = validateChatRange(input.startDate, input.endDate);
+  const previousRange = getPreviousChatRange(range);
   const store = await requireStoreAccess(auth, input.storeId);
   const entries = await Promise.all([...REPORT_TYPES].map(async (reportType) => {
     try {
       const payload = await getReportPayload(auth, reportType, store.id);
       const summarize = reportType === 'search-share' ? summarizeSearch : reportType === 'placement' ? summarizePlacement : summarizePurchased;
-      return [reportType, { available: true, datasetId: payload.datasetId, ...summarize(payload, range) }];
+      const current = summarize(payload, range);
+      const previous = summarize(payload, previousRange);
+      return [reportType, { available: true, datasetId: payload.datasetId, ...current }, previous];
     } catch (error) {
       if (error instanceof ReportDataError && error.status === 404) {
         return [reportType, { available: false, sourceRowCount: 0, matchedRowCount: 0 }];
@@ -148,17 +160,21 @@ export async function buildChatData(auth, input) {
       throw error;
     }
   }));
-  const reports = Object.fromEntries(entries);
+  const reports = Object.fromEntries(entries.map(([type, report]) => [type, report]));
+  const previousReports = Object.fromEntries(entries.map(([type, , previous]) => [type, previous || { available: false, sourceRowCount: 0, matchedRowCount: 0 }]));
   if (!entries.some(([, report]) => report.available && report.matchedRowCount > 0)) {
     throw new ReportDataError('当前时间范围内没有可分析的广告数据', 404);
   }
   return {
     store,
     range,
+    previousRange,
     reports,
+    previousReports,
     dataSnapshot: {
       storeId: store.id,
       range,
+      previousRange,
       datasets: Object.fromEntries(entries.map(([type, report]) => [type, {
         available: report.available,
         datasetId: report.datasetId || null,

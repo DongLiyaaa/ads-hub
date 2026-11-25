@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCodexHome } from './codexHome.js';
-import { buildTrustedChatViewModel, getAdvertisingChatA2uiPrompt, getAllowedChatDataPaths } from './a2uiChat.js';
+import { getAdvertisingChatA2uiPrompt } from './a2uiChat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,8 +56,8 @@ const ADVERTISING_CHAT_PROMPT = `你是 ShareScope 的亚马逊广告 AI 分析�
 必须区分投放 ASIN 与已购买 ASIN。缺少利润、库存、预算或目标 ACOS 时，不得虚构；优化建议只能作为人工复核建议。
 默认使用中文，先直接回答当前问题，再列出关键数据依据和谨慎的下一步建议。可使用简洁标题、列表和 Markdown 表格，避免重复完整对话或数据口径。`;
 
-export function compactCodexPayload(payload) {
-  const reports = Object.fromEntries(Object.entries(payload.reports || {}).map(([type, report]) => {
+function compactReports(reports) {
+  return Object.fromEntries(Object.entries(reports || {}).map(([type, report]) => {
     const compact = { ...report };
     for (const [key, value] of Object.entries(report)) {
       if (!Array.isArray(value)) continue;
@@ -73,7 +73,14 @@ export function compactCodexPayload(payload) {
     }
     return [type, compact];
   }));
-  return { ...payload, reports };
+}
+
+export function compactCodexPayload(payload) {
+  return {
+    ...payload,
+    reports: compactReports(payload.reports),
+    ...(payload.previousReports ? { previousReports: compactReports(payload.previousReports) } : {}),
+  };
 }
 
 export function buildCodexPrompt(payload, selfCheck = false) {
@@ -82,7 +89,7 @@ export function buildCodexPrompt(payload, selfCheck = false) {
   const compact = payload?.reportType === 'advertising-chat' && Buffer.byteLength(serialized) > 65536;
   const renderedPayload = compact ? compactCodexPayload(payload) : payload;
   const a2uiPrompt = payload?.reportType === 'advertising-chat'
-    ? `\n\n${getAdvertisingChatA2uiPrompt()}\n\n本轮可用服务端数据路径：\n${getAllowedChatDataPaths(buildTrustedChatViewModel(payload)).join('\n')}`
+    ? `\n\n${getAdvertisingChatA2uiPrompt()}`
     : '';
   const encodingNote = compact
     ? '\n大请求的报表数组采用 columns + rows 列式编码：每行严格按 columns 顺序取值；所有分组均完整保留，数值最多保留四位小数。'

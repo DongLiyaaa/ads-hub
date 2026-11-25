@@ -1,7 +1,18 @@
 import { pool } from './db.js';
 import { AuthError, requireStoreAccess } from './tenancy.js';
+import { DEFAULT_VIEW_STATE, validateChatViewState } from './chatViewState.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeStoredViewState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_VIEW_STATE };
+  return {
+    metricByComponent: value.metricByComponent || {},
+    selectedEntity: value.selectedEntity || null,
+    comparePrevious: value.comparePrevious === true,
+    viewByComponent: value.viewByComponent || {},
+  };
+}
 
 function mapMessage(row) {
   return {
@@ -19,6 +30,7 @@ function mapMessage(row) {
       status: row.ui_status,
       errorCode: row.ui_error_code,
     } : null,
+    viewState: normalizeStoredViewState(row.view_state),
     createdAt: row.created_at,
   };
 }
@@ -62,6 +74,25 @@ export async function getRecentMessages(auth, conversationId, storeId) {
   return result.messages.slice(-12).map(({ role, content }) => ({ role, content }));
 }
 
+export async function saveChatViewState(auth, messageId, storeId, input) {
+  if (!UUID_PATTERN.test(messageId || '')) throw new AuthError('消息 ID 无效');
+  await requireStoreAccess(auth, storeId);
+  const { rows } = await pool.query(
+    `SELECT m.id, m.ui_payload, m.ui_status FROM ai_conversation_messages m
+     JOIN ai_conversations c ON c.id = m.conversation_id AND c.tenant_id = m.tenant_id AND c.user_id = m.user_id
+     WHERE m.id = $1 AND m.tenant_id = $2 AND m.user_id = $3 AND m.role = 'assistant' AND c.store_id = $4`,
+    [messageId, auth.tenant.id, auth.user.id, storeId],
+  );
+  const message = rows[0];
+  if (!message || message.ui_status !== 'ready') throw new AuthError('助手消息不存在、店铺不匹配或您无权修改', 404);
+  const viewState = validateChatViewState(input, message.ui_payload);
+  await pool.query(
+    'UPDATE ai_conversation_messages SET view_state = $2::jsonb WHERE id = $1 AND tenant_id = $3 AND user_id = $4',
+    [messageId, JSON.stringify(viewState), auth.tenant.id, auth.user.id],
+  );
+  return { viewState };
+}
+
 export async function saveChatExchange(auth, input) {
   const client = await pool.connect();
   try {
@@ -95,7 +126,7 @@ export async function saveChatExchange(auth, input) {
        VALUES ($1, $2, $3, 'assistant', $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12, $13) RETURNING *`,
       [...common, input.answer, JSON.stringify(input.skills), JSON.stringify(input.dataSnapshot), input.agentType, input.model,
         input.ui?.protocolVersion || null, input.ui?.catalogId || null,
-        input.ui ? JSON.stringify({ messages: input.ui.messages }) : null,
+        input.ui ? JSON.stringify({ messages: input.ui.messages, sceneId: input.ui.sceneId || null }) : null,
         input.ui?.status || null, input.ui?.errorCode || null],
     );
     const { rows: conversations } = await client.query(

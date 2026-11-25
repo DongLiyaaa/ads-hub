@@ -25,6 +25,7 @@ RUN npm ci --omit=dev --registry=https://registry.npmmirror.com \
     && /app/node_modules/.bin/codex --version
 COPY server ./server
 COPY db ./db
+COPY data/demo ./data/demo
 COPY shared ./shared
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /home/node/.codex && chown node:node /home/node/.codex

@@ -7,6 +7,7 @@ import PurchasedProductExplorer from '../components/purchased/PurchasedProductEx
 import PurchasedProductSalesCompositionChart from '../components/purchased/PurchasedProductSalesCompositionChart.jsx';
 import PurchasedProductTrendChart from '../components/purchased/PurchasedProductTrendChart.jsx';
 import TopPurchasedProductChart from '../components/purchased/TopPurchasedProductChart.jsx';
+import ReportUpload from '../components/ReportUpload.jsx';
 import { buildPurchasedProductSnapshot, filterPurchasedProductRows, preparePurchasedProductData } from '../lib/purchasedProductData.js';
 import { formatCurrency, formatNumber } from '../lib/data.js';
 import useReportData from '../hooks/useReportData.js';
@@ -31,14 +32,14 @@ export default function PurchasedProductDashboard({ session, storeId, onStoreCha
   const filteredDates = useMemo(() => data && range ? data.dates.filter((date) => date >= range.startDate && date <= range.endDate) : [], [data, range]);
   const snapshot = useMemo(() => buildPurchasedProductSnapshot(filteredRows), [filteredRows]);
 
-  if (error) return <AppShell page="purchased-product" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}><main className="dashboard"><section className="panel empty-workspace" role="alert"><span className="status-icon"><Package size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新加载</button></section></main></AppShell>;
+  if (error) return <AppShell page="purchased-product" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}><main className="dashboard"><section className="panel empty-workspace" role="alert"><span className="status-icon"><Package size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><div className="empty-workspace__actions"><ReportUpload reportType="purchased-product" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新加载</button></div></section></main></AppShell>;
   if (!data || !range) return <main className="status-screen" aria-live="polite"><div className="loading-content"><Brand /><span className="loading-spinner" aria-hidden="true" /><p>正在整理已购买商品数据…</p></div></main>;
 
   const { summary } = snapshot;
   return (
     <AppShell page="purchased-product" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout} onRefresh={refresh} cacheInfo={cacheInfo} dateProps={{ minDate: data.minDate, maxDate: data.maxDate, startDate: range.startDate, endDate: range.endDate, onChange: (startDate, endDate) => setRange({ startDate, endDate }) }}>
       <main className="dashboard purchased-product-dashboard">
-        <div className="page-heading"><div><h1>已购买商品报表分析</h1><p>识别广告 ASIN 带来的实际购买商品，区分引流入口、购买承接与待验证路径。</p></div><div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div></div>
+        <div className="page-heading"><div><h1>已购买商品报表分析</h1><p>识别广告 ASIN 带来的实际购买商品，区分引流入口、购买承接与待验证路径。</p></div><div className="page-heading__actions"><ReportUpload reportType="purchased-product" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div></div></div>
         <section className="stats-grid" aria-label="已购买商品核心指标">
           <StatCard icon={CircleDollarSign} label="其他 SKU 销售额" value={formatCurrency(summary.sales)} rawValue={formatCurrency(summary.sales)} note={`7 天归因 · ${formatNumber(summary.purchasedAsinCount)} 个购买 ASIN`} />
           <StatCard icon={ShoppingCart} label="其他 SKU 订单数" value={formatNumber(summary.orders)} rawValue={formatNumber(summary.orders)} note={`${formatNumber(summary.positiveRowCount)} 条非零购买记录`} />
@@ -49,7 +50,7 @@ export default function PurchasedProductDashboard({ session, storeId, onStoreCha
         <div className="charts-grid placement-charts-grid"><PurchasedProductTrendChart snapshot={snapshot} dates={filteredDates} /><TopPurchasedProductChart items={snapshot.purchased} /></div>
         <PurchasedProductSalesCompositionChart items={snapshot.purchased} paths={snapshot.paths} />
         <PurchasedProductExplorer snapshot={snapshot} startDate={range.startDate} endDate={range.endDate} />
-        <footer className="dashboard-footer"><p>演示数据：{data.storeCode} 商品推广已购买商品报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p><p>仅有其他 SKU 销售额、订单与销售量；缺少花费、点击、利润、库存和父子 ASIN 映射，商品角色均需进一步验证。</p></footer>
+        <footer className="dashboard-footer"><p>{session.currentTenant.environment === 'demo' ? '演示数据' : '报表数据'}：{data.storeCode} 商品推广已购买商品报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p><p>仅有其他 SKU 销售额、订单与销售量；缺少花费、点击、利润、库存和父子 ASIN 映射，商品角色均需进一步验证。</p></footer>
       </main>
     </AppShell>
   );

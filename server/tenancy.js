@@ -7,6 +7,8 @@ const SESSION_COOKIE = 'sharescope_session';
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
 const DEFAULT_STORE_ID = '00000000-0000-4000-8000-000000000101';
+const DEMO_TENANT_ID = '00000000-0000-4000-8000-00000000d001';
+const DEMO_STORE_ID = '00000000-0000-4000-8000-00000000d101';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const loginAttempts = new Map();
 
@@ -80,8 +82,15 @@ async function insertSession(userId, tenantId) {
   return { token, sessionId: rows[0].id, expiresAt: rows[0].expires_at };
 }
 
+const FORMAL_ADMIN_QUERY = `SELECT EXISTS (
+  SELECT 1 FROM tenant_memberships m
+  JOIN tenants t ON t.id = m.tenant_id AND t.environment = 'formal'
+  JOIN app_users u ON u.id = m.user_id AND u.active = true
+  WHERE m.role = 'admin' AND m.active = true
+) AS configured`;
+
 export async function getSetupStatus() {
-  const { rows } = await pool.query('SELECT EXISTS (SELECT 1 FROM app_users) AS configured');
+  const { rows } = await pool.query(FORMAL_ADMIN_QUERY);
   return { needsSetup: !rows[0].configured };
 }
 
@@ -95,7 +104,7 @@ export async function setupAdministrator(input) {
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['sharescope-bootstrap']);
-    const { rows } = await client.query('SELECT EXISTS (SELECT 1 FROM app_users) AS configured');
+    const { rows } = await client.query(FORMAL_ADMIN_QUERY);
     if (rows[0].configured) throw new AuthError('管理员已完成初始化，请直接登录', 409);
     const { rows: users } = await client.query(
       'INSERT INTO app_users (email, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id',
@@ -153,13 +162,44 @@ export async function loginAdministratorOrUser(request, input) {
   return insertSession(user.id, memberships[0].tenant_id);
 }
 
+export async function loginDemo() {
+  const client = await pool.connect();
+  let userId;
+  try {
+    await client.query('BEGIN');
+    const { rows: tenants } = await client.query("SELECT id FROM tenants WHERE id = $1 AND environment = 'demo' AND active = true", [DEMO_TENANT_ID]);
+    if (!tenants[0]) throw new AuthError('Demo 暂不可用，请稍后重试', 503);
+    const email = `demo-${crypto.randomUUID()}@demo.sharescope.local`;
+    const { rows: users } = await client.query(
+      'INSERT INTO app_users (email, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id',
+      [email, 'Demo 访客', `demo-only:${crypto.randomBytes(32).toString('base64url')}`],
+    );
+    userId = users[0].id;
+    const { rows: memberships } = await client.query(
+      "INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES ($1, $2, 'user') RETURNING id",
+      [DEMO_TENANT_ID, userId],
+    );
+    await client.query(
+      'INSERT INTO user_store_access (tenant_id, membership_id, store_id) VALUES ($1, $2, $3)',
+      [DEMO_TENANT_ID, memberships[0].id, DEMO_STORE_ID],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return insertSession(userId, DEMO_TENANT_ID);
+}
+
 export async function authenticate(request, response, next) {
   try {
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
     if (!token) throw new AuthError('请先登录', 401);
     const { rows } = await pool.query(
       `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.display_name,
-        t.id AS tenant_id, t.name AS tenant_name, m.role
+        t.id AS tenant_id, t.name AS tenant_name, t.environment AS tenant_environment, m.role
        FROM app_sessions s
        JOIN app_users u ON u.id = s.user_id AND u.active = true
        JOIN tenant_memberships m ON m.tenant_id = s.active_tenant_id AND m.user_id = s.user_id AND m.active = true
@@ -173,7 +213,7 @@ export async function authenticate(request, response, next) {
       sessionId: row.session_id,
       expiresAt: row.expires_at,
       user: { id: row.user_id, email: row.email, displayName: row.display_name },
-      tenant: { id: row.tenant_id, name: row.tenant_name, role: row.role },
+      tenant: { id: row.tenant_id, name: row.tenant_name, role: row.role, environment: row.tenant_environment },
     };
     next();
   } catch (error) {
@@ -209,7 +249,7 @@ export async function getAccessibleStores(auth) {
 export async function getSessionPayload(auth) {
   const [{ rows: tenants }, stores] = await Promise.all([
     pool.query(
-      `SELECT t.id, t.name, m.role FROM tenant_memberships m JOIN tenants t ON t.id = m.tenant_id
+      `SELECT t.id, t.name, t.environment, m.role FROM tenant_memberships m JOIN tenants t ON t.id = m.tenant_id
         WHERE m.user_id = $1 AND m.active = true AND t.active = true ORDER BY t.created_at, t.name`,
       [auth.user.id],
     ),

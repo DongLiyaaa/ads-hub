@@ -8,6 +8,7 @@ import PlacementPerformanceTable from '../components/placement/PlacementPerforma
 import PlacementStrategyTable from '../components/placement/PlacementStrategyTable.jsx';
 import PlacementStructureChart from '../components/placement/PlacementStructureChart.jsx';
 import PlacementTrendChart from '../components/placement/PlacementTrendChart.jsx';
+import ReportUpload from '../components/ReportUpload.jsx';
 import { buildPlacementAnalysisSnapshot } from '../lib/placementAnalysis.js';
 import { filterPlacementRows, preparePlacementData, summarizePlacements } from '../lib/placementData.js';
 import { formatCompact, formatCurrency, formatNumber, formatPercent } from '../lib/data.js';
@@ -41,7 +42,7 @@ export default function PlacementDashboard({ session, storeId, onStoreChange, on
   const { summary, placements } = useMemo(() => summarizePlacements(filteredRows), [filteredRows]);
   const snapshot = useMemo(() => buildPlacementAnalysisSnapshot(filteredRows), [filteredRows]);
 
-  if (error) return <AppShell page="placement" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}><main className="dashboard"><section className="panel empty-workspace" role="alert"><span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新加载</button></section></main></AppShell>;
+  if (error) return <AppShell page="placement" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout}><main className="dashboard"><section className="panel empty-workspace" role="alert"><span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span><h1>看板暂时无法加载</h1><p>{error}</p><div className="empty-workspace__actions"><ReportUpload reportType="placement" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} aria-hidden="true" />重新加载</button></div></section></main></AppShell>;
   if (!data || !range) return <main className="status-screen" aria-live="polite"><div className="loading-content"><Brand /><span className="loading-spinner" aria-hidden="true" /><p>正在整理广告位数据…</p></div></main>;
 
   return (
@@ -65,7 +66,7 @@ export default function PlacementDashboard({ session, storeId, onStoreChange, on
       <main className="dashboard placement-dashboard">
         <div className="page-heading">
           <div><h1>广告位报表分析</h1><p>比较搜索顶部、其余搜索与商品页面的投入产出，定位可扩量与需复核的广告活动。</p></div>
-          <div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div>
+          <div className="page-heading__actions"><ReportUpload reportType="placement" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div></div>
         </div>
 
         <section className="stats-grid" aria-label="广告位核心指标">
@@ -85,7 +86,7 @@ export default function PlacementDashboard({ session, storeId, onStoreChange, on
         <PlacementCampaignTable rows={snapshot.campaigns} summary={summary} startDate={range.startDate} endDate={range.endDate} />
 
         <footer className="dashboard-footer">
-          <p>演示数据：{data.storeCode} 商品推广广告位报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p>
+          <p>{session.currentTenant.environment === 'demo' ? '演示数据' : '报表数据'}：{data.storeCode} 商品推广广告位报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p>
           <p>日期＋广告组合＋广告活动＋广告位为原始粒度；订单、销售额与销售量为7天归因，比率由汇总基础字段重算。</p>
         </footer>
       </main>

@@ -6,6 +6,7 @@ import KeywordTable from '../components/KeywordTable.jsx';
 import StatCard from '../components/StatCard.jsx';
 import TrendChart from '../components/TrendChart.jsx';
 import WordCloud from '../components/WordCloud.jsx';
+import ReportUpload from '../components/ReportUpload.jsx';
 import {
   aggregateEntries,
   filterEntriesByDate,
@@ -63,7 +64,7 @@ export default function SearchShareDashboard({ session, storeId, onStoreChange, 
           <span className="status-icon"><BarChart3 size={26} aria-hidden="true" /></span>
           <h1>看板暂时无法加载</h1>
           <p>{error}</p>
-          <button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} />重新加载</button>
+          <div className="empty-workspace__actions"><ReportUpload reportType="search-share" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><button type="button" className="primary-button" onClick={refresh}><RefreshCw size={16} />重新加载</button></div>
         </section></main>
       </AppShell>
     );
@@ -103,7 +104,7 @@ export default function SearchShareDashboard({ session, storeId, onStoreChange, 
             <h1>搜索词展示份额</h1>
             <p>看清关键词的市场可见度与变化趋势。</p>
           </div>
-          <div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div>
+          <div className="page-heading__actions"><ReportUpload reportType="search-share" storeId={storeId} onUploaded={refresh} isDemo={session.currentTenant.environment === 'demo'} /><div className="data-freshness"><span aria-hidden="true" />数据更新至 {data.maxDate.replaceAll('-', '/')}</div></div>
         </div>
 
         <section className="stats-grid" aria-label="核心指标">
@@ -123,7 +124,7 @@ export default function SearchShareDashboard({ session, storeId, onStoreChange, 
         <KeywordTable keywords={keywords} startDate={range.startDate} endDate={range.endDate} />
 
         <footer className="dashboard-footer">
-          <p>演示数据：{data.storeCode} 商品推广搜索词展示量份额报告 · 原始 {formatNumber(data.totalRows)} 行{data.skippedRows ? ` · 跳过 ${formatNumber(data.skippedRows)} 行` : ''}</p>
+          <p>{session.currentTenant.environment === 'demo' ? '演示数据' : '报表数据'}：{data.storeCode} 商品推广搜索词展示量份额报告 · 原始 {formatNumber(data.totalRows)} 行{data.skippedRows ? ` · 跳过 ${formatNumber(data.skippedRows)} 行` : ''}</p>
           <p>同一日期、同一搜索词的份额只计一次；展示量、点击量等指标按广告活动累加。</p>
         </footer>
       </main>

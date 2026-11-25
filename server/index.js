@@ -9,13 +9,15 @@ import { processChatA2ui } from './a2uiChat.js';
 import { AgentConfigError, getActiveAgentConfig, getAgentSettings, recordAgentCheck, saveAgentSettings } from './configStore.js';
 import { checkDatabase, runMigrations } from './db.js';
 import { getAnalysisDataset, getReportPayload, REPORT_TYPES, ReportDataError } from './reportData.js';
+import { uploadReportExcel } from './reportImport.js';
+import { seedDemoData } from './demoData.js';
 import { getLatestAnalysis, saveAnalysis } from './analysisStore.js';
 import { buildChatData, getChatContext } from './chatData.js';
-import { getConversation, getRecentMessages, listConversations, saveChatExchange } from './chatStore.js';
+import { getConversation, getRecentMessages, listConversations, saveChatExchange, saveChatViewState } from './chatStore.js';
 import { deleteSkill, getSkillOptions, getSkillsForChat, listSkills, saveSkill } from './skills.js';
 import {
   AuthError, authenticate, clearSessionCookie, createStore, createTenant, createTenantUser,
-  getSessionPayload, getSetupStatus, listTenantAdmin, loginAdministratorOrUser, logout,
+  getSessionPayload, getSetupStatus, listTenantAdmin, loginAdministratorOrUser, loginDemo, logout,
   requireAdmin, requireSameSiteRequest, setSessionCookie, setupAdministrator,
   switchTenant, updateTenantUser,
 } from './tenancy.js';
@@ -23,6 +25,8 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const activeRequests = new Map();
+const activeChatRequests = new Map();
+const activeConversationRequests = new Map();
 const activeTenantTasks = new Map();
 
 function removeUnsupportedCharacters(value) {
@@ -83,6 +87,11 @@ app.post('/api/auth/setup', requireSameSiteRequest, async (request, response) =>
 });
 app.post('/api/auth/login', requireSameSiteRequest, async (request, response) => {
   const session = await loginAdministratorOrUser(request, request.body);
+  setSessionCookie(request, response, session.token);
+  response.json({ ok: true });
+});
+app.post('/api/auth/demo', requireSameSiteRequest, async (request, response) => {
+  const session = await loginDemo();
   setSessionCookie(request, response, session.token);
   response.json({ ok: true });
 });
@@ -170,6 +179,11 @@ app.get('/api/chat/conversations', async (request, response) => {
 app.get('/api/chat/conversations/:conversationId', async (request, response) => {
   response.json(await getConversation(request.auth, request.params.conversationId, request.query.storeId));
 });
+app.patch('/api/chat/messages/:messageId/view-state', async (request, response) => {
+  const payload = removeUnsupportedCharacters(request.body);
+  const result = await saveChatViewState(request.auth, request.params.messageId, payload?.storeId, payload?.viewState);
+  response.json(result);
+});
 app.post('/api/chat/messages', async (request, response) => {
   const payload = removeUnsupportedCharacters(request.body);
   const message = String(payload?.message || '').trim();
@@ -179,14 +193,20 @@ app.post('/api/chat/messages', async (request, response) => {
     return response.status(503).json({ error: `未找到 ${agentConfig.name}，请联系租户管理员检查 Agent 与模型配置。` });
   }
   const tenantId = request.auth.tenant.id;
+  const clientRequestId = String(payload?.clientRequestId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(clientRequestId)) return response.status(400).json({ error: '缺少有效的对话请求标识' });
+  const conversationLockKey = `${tenantId}:${payload?.conversationId || `new:${request.auth.user.id}:${clientRequestId}`}`;
   const previousTask = activeTenantTasks.get(tenantId);
   if (previousTask?.clientDisconnected) {
     previousTask.controller.abort();
     await Promise.race([previousTask.done, new Promise((resolve) => setTimeout(resolve, 4000))]);
   }
   const tenantRequests = activeRequests.get(tenantId) || 0;
+  const tenantChatRequests = activeChatRequests.get(tenantId) || 0;
+  const tenantReportRequests = tenantRequests - tenantChatRequests;
   const totalRequests = [...activeRequests.values()].reduce((sum, count) => sum + count, 0);
-  if (tenantRequests >= 1 || totalRequests >= 2) return response.status(429).json({ error: '已有分析或对话任务正在进行，请稍后重试。' });
+  if (activeConversationRequests.has(conversationLockKey)) return response.status(409).json({ error: '当前对话正在生成，请等待本轮完成。' });
+  if (tenantReportRequests >= 1 || tenantChatRequests >= 3 || totalRequests >= 5) return response.status(429).json({ error: '同时分析任务较多，请稍后重试；每个租户最多并行 3 个对话。' });
 
   const abortController = new AbortController();
   let resolveTaskDone;
@@ -200,6 +220,8 @@ app.post('/api/chat/messages', async (request, response) => {
   request.on('aborted', handleDisconnect);
   response.on('close', handleDisconnect);
   activeRequests.set(tenantId, tenantRequests + 1);
+  activeChatRequests.set(tenantId, tenantChatRequests + 1);
+  activeConversationRequests.set(conversationLockKey, true);
   activeTenantTasks.set(tenantId, taskEntry);
   let stage = 'dataset';
   try {
@@ -212,10 +234,12 @@ app.post('/api/chat/messages', async (request, response) => {
       reportType: 'advertising-chat',
       store: chatData.store,
       range: chatData.range,
+      previousRange: chatData.previousRange,
       question: message,
       history,
       skills,
       reports: chatData.reports,
+      previousReports: chatData.previousReports,
     };
     if (JSON.stringify(promptPayload).length > 6000000) {
       throw new ReportDataError('当前对话数据超过 6MB，请缩短时间范围后重试。', 413);
@@ -247,6 +271,10 @@ app.post('/api/chat/messages', async (request, response) => {
     request.off('aborted', handleDisconnect);
     response.off('close', handleDisconnect);
     if (activeTenantTasks.get(tenantId) === taskEntry) activeTenantTasks.delete(tenantId);
+    const remainingChats = (activeChatRequests.get(tenantId) || 1) - 1;
+    if (remainingChats) activeChatRequests.set(tenantId, remainingChats);
+    else activeChatRequests.delete(tenantId);
+    activeConversationRequests.delete(conversationLockKey);
     const remaining = (activeRequests.get(tenantId) || 1) - 1;
     if (remaining) activeRequests.set(tenantId, remaining);
     else activeRequests.delete(tenantId);
@@ -301,6 +329,16 @@ app.post('/api/agent-settings/codex/oauth/cancel', async (request, response) => 
   response.json(await getCodexOAuthState(request.auth.tenant.id));
 });
 
+app.post('/api/reports/:reportType/upload', express.raw({ type: () => true, limit: '20mb' }), async (request, response) => {
+  let sourceName = 'report.xlsx';
+  try {
+    if (request.headers['x-report-file-name']) sourceName = decodeURIComponent(request.headers['x-report-file-name']);
+  } catch {
+    throw new ReportDataError('文件名编码无效');
+  }
+  const result = await uploadReportExcel(request.auth, request.params.reportType, request.query.storeId, sourceName, request.body);
+  response.status(result.duplicate ? 200 : 201).json(result);
+});
 app.get('/api/reports/:reportType', async (request, response) => {
   response.json(await getReportPayload(request.auth, request.params.reportType, request.query.storeId));
 });
@@ -370,7 +408,7 @@ app.post('/api/analysis', async (request, response) => {
 });
 
 app.use((error, request, response, next) => {
-  if (error?.type === 'entity.too.large') return response.status(413).json({ error: '分析数据超过 8MB，请缩小时间范围。' });
+  if (error?.type === 'entity.too.large') return response.status(413).json({ error: request.path.includes('/upload') ? 'Excel 文件不能超过 20MB。' : '分析数据超过 8MB，请缩小时间范围。' });
   if (error instanceof SyntaxError) return response.status(400).json({ error: '请求 JSON 格式无效。' });
   if (error instanceof AuthError || error instanceof ReportDataError || error instanceof AgentConfigError || error instanceof CodexCliError) return response.status(error.status).json({ error: error.message });
   console.error('Request failed:', error.name || 'Error');
@@ -402,6 +440,7 @@ const host = process.env.HOST || '0.0.0.0';
 
 async function start() {
   await runMigrations();
+  await seedDemoData();
   app.listen(port, host, () => {
     console.log(`ShareScope server listening on ${host}:${port} (${process.env.NODE_ENV || 'development'})`);
   });

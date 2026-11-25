@@ -16,6 +16,10 @@ const SUGGESTIONS = [
   '分析投放 ASIN 与已购买 ASIN 的主要销售承接路径',
 ];
 
+function createDraftKey() {
+  return `draft_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
 function formatTime(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
@@ -24,68 +28,86 @@ function formatTime(value) {
 export default function AiChatPage({ session, storeId, onStoreChange, onSwitchTenant, onLogout }) {
   const [context, setContext] = useState(null);
   const [conversations, setConversations] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [selectedKey, setSelectedKey] = useState(createDraftKey);
+  const [messageCache, setMessageCache] = useState({});
+  const [pending, setPending] = useState({});
+  const [inputs, setInputs] = useState({});
+  const [errors, setErrors] = useState({});
+  const [loadingKeys, setLoadingKeys] = useState({});
   const [range, setRange] = useState({ startDate: '', endDate: '' });
   const [selectedSkills, setSelectedSkills] = useState([]);
-  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
   const messageEndRef = useRef(null);
-  const requestSequence = useRef(0);
+  const workspaceSequence = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    const sequence = ++requestSequence.current;
+    const workspace = ++workspaceSequence.current;
+    const draftKey = createDraftKey();
     setLoading(true);
-    setSending(false);
-    setError('');
     setContext(null);
     setConversations([]);
-    setSelectedId(null);
-    setMessages([]);
+    setSelectedKey(draftKey);
+    setMessageCache({});
+    setPending({});
+    setInputs({});
+    setErrors({});
+    setLoadingKeys({});
     setSelectedSkills([]);
-    setInput('');
     Promise.all([
       apiFetch(`/api/chat/bootstrap?storeId=${encodeURIComponent(storeId)}`, { signal: controller.signal }),
       apiFetch(`/api/chat/conversations?storeId=${encodeURIComponent(storeId)}`, { signal: controller.signal }),
     ]).then(([bootstrap, history]) => {
-      if (sequence !== requestSequence.current) return;
+      if (workspace !== workspaceSequence.current) return;
       setContext(bootstrap);
       setRange(bootstrap.range || { startDate: '', endDate: '' });
-      setConversations(history.conversations);
+      setConversations(history.conversations.map((conversation) => ({ ...conversation, uiKey: conversation.id })));
     }).catch((loadError) => {
-      if (loadError.name !== 'AbortError' && sequence === requestSequence.current) setError(loadError.message);
+      if (loadError.name !== 'AbortError' && workspace === workspaceSequence.current) setErrors({ [draftKey]: loadError.message });
     }).finally(() => {
-      if (sequence === requestSequence.current) setLoading(false);
+      if (workspace === workspaceSequence.current) setLoading(false);
     });
     return () => controller.abort();
   }, [storeId]);
 
+  const selectedConversation = conversations.find((conversation) => conversation.uiKey === selectedKey);
+  const selectedId = selectedConversation?.id || null;
+  const messages = messageCache[selectedKey] || [];
+  const input = inputs[selectedKey] || '';
+  const currentPending = pending[selectedKey];
+  const sending = Boolean(currentPending);
+  const error = errors[selectedKey] || '';
+
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: 'nearest', behavior: messages.length > 2 ? 'smooth' : 'auto' });
-  }, [messages, sending]);
+  }, [messages, sending, selectedKey]);
 
   const newConversation = () => {
-    requestSequence.current += 1;
-    setSelectedId(null);
-    setMessages([]);
-    setError('');
-    setInput('');
+    const draftKey = createDraftKey();
+    setSelectedKey(draftKey);
+    setInputs((previous) => ({ ...previous, [draftKey]: '' }));
+    setMessageCache((previous) => ({ ...previous, [draftKey]: [] }));
   };
 
-  const openConversation = async (conversationId) => {
-    if (sending || conversationId === selectedId) return;
-    const sequence = ++requestSequence.current;
-    setError('');
+  const openConversation = async (conversation) => {
+    const key = conversation.uiKey || conversation.id;
+    setSelectedKey(key);
+    if (pending[key] || messageCache[key]) return;
+    const workspace = workspaceSequence.current;
+    setLoadingKeys((previous) => ({ ...previous, [key]: true }));
+    setErrors((previous) => ({ ...previous, [key]: '' }));
     try {
-      const body = await apiFetch(`/api/chat/conversations/${conversationId}?storeId=${encodeURIComponent(storeId)}`);
-      if (sequence !== requestSequence.current) return;
-      setSelectedId(conversationId);
-      setMessages(body.messages);
+      const body = await apiFetch(`/api/chat/conversations/${conversation.id}?storeId=${encodeURIComponent(storeId)}`);
+      if (workspace !== workspaceSequence.current) return;
+      setMessageCache((previous) => ({ ...previous, [key]: body.messages }));
     } catch (loadError) {
-      if (sequence === requestSequence.current) setError(loadError.message);
+      if (workspace === workspaceSequence.current) setErrors((previous) => ({ ...previous, [key]: loadError.message }));
+    } finally {
+      if (workspace === workspaceSequence.current) setLoadingKeys((previous) => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
     }
   };
 
@@ -95,34 +117,42 @@ export default function AiChatPage({ session, storeId, onStoreChange, onSwitchTe
 
   const send = async (event) => {
     event?.preventDefault();
-    const message = input.trim();
-    if (!message || sending || !context?.agent.configured) return;
+    const key = selectedKey;
+    const message = (inputs[key] || '').trim();
+    if (!message || pending[key] || !context?.agent.configured) return;
     if (!range.startDate || !range.endDate || range.endDate < range.startDate) {
-      setError('请选择有效的分析时间范围');
+      setErrors((previous) => ({ ...previous, [key]: '请选择有效的分析时间范围' }));
       return;
     }
-    setSending(true);
-    const sequence = ++requestSequence.current;
-    setError('');
-    const optimistic = { id: `local-${Date.now()}`, role: 'user', content: message, skills: context.skills.filter((skill) => selectedSkills.includes(skill.id)), createdAt: new Date().toISOString() };
-    setMessages((previous) => [...previous, optimistic]);
-    setInput('');
+    const workspace = workspaceSequence.current;
+    const conversationId = conversations.find((conversation) => conversation.uiKey === key)?.id || null;
+    const skillIds = [...selectedSkills];
+    const skillNames = context.skills.filter((skill) => skillIds.includes(skill.id)).map((skill) => skill.name);
+    const optimisticId = `local_${crypto.randomUUID().replaceAll('-', '')}`;
+    const optimistic = { id: optimisticId, role: 'user', content: message, skills: context.skills.filter((skill) => skillIds.includes(skill.id)), createdAt: new Date().toISOString() };
+    setPending((previous) => ({ ...previous, [key]: { optimisticId, skillNames } }));
+    setErrors((previous) => ({ ...previous, [key]: '' }));
+    setMessageCache((previous) => ({ ...previous, [key]: [...(previous[key] || []), optimistic] }));
+    setInputs((previous) => ({ ...previous, [key]: '' }));
     try {
       const body = await apiFetch('/api/chat/messages', {
         method: 'POST',
-        body: JSON.stringify({ conversationId: selectedId, storeId, ...range, message, skillIds: selectedSkills }),
+        body: JSON.stringify({ conversationId, clientRequestId: key, storeId, ...range, message, skillIds }),
       });
-      if (sequence !== requestSequence.current) return;
-      setSelectedId(body.conversation.id);
-      setMessages((previous) => [...previous, body.assistantMessage]);
-      setConversations((previous) => [body.conversation, ...previous.filter((item) => item.id !== body.conversation.id)]);
+      if (workspace !== workspaceSequence.current) return;
+      setMessageCache((previous) => ({ ...previous, [key]: [...(previous[key] || []), body.assistantMessage] }));
+      setConversations((previous) => [{ ...body.conversation, uiKey: key }, ...previous.filter((item) => item.id !== body.conversation.id)]);
     } catch (sendError) {
-      if (sequence !== requestSequence.current) return;
-      setMessages((previous) => previous.filter((item) => item.id !== optimistic.id));
-      setInput(message);
-      setError(sendError.message);
+      if (workspace !== workspaceSequence.current) return;
+      setMessageCache((previous) => ({ ...previous, [key]: (previous[key] || []).filter((item) => item.id !== optimisticId) }));
+      setInputs((previous) => ({ ...previous, [key]: message }));
+      setErrors((previous) => ({ ...previous, [key]: sendError.message }));
     } finally {
-      if (sequence === requestSequence.current) setSending(false);
+      if (workspace === workspaceSequence.current) setPending((previous) => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
     }
   };
 
@@ -131,15 +161,15 @@ export default function AiChatPage({ session, storeId, onStoreChange, onSwitchTe
 
   return <AppShell page="ai-chat" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout} reportContext="广告 AI 对话">
     <main className="dashboard ai-chat-page">
-      <div className="page-heading"><div><h1>广告 AI 对话</h1><p>围绕当前店铺＋站点的三类广告数据连续提问，并按需加载 Skill。</p></div><button type="button" className="primary-button" onClick={newConversation} disabled={sending}><Plus size={16} />新对话</button></div>
+      <div className="page-heading"><div><h1>广告 AI 对话</h1><p>围绕当前店铺＋站点的三类广告数据连续提问，并按需加载 Skill。</p></div><button type="button" className="primary-button" onClick={newConversation}><Plus size={16} />新对话</button></div>
       <div className="chat-agent-bar"><span className="chat-agent-bar__icon">{context?.agent.type === 'claude-code' ? <Bot size={19} /> : <SquareTerminal size={19} />}</span><div><strong>{context?.agent.name || '管理员启用的 Agent'}</strong><small>{context ? `${context.agent.model} · 由租户管理员统一配置` : '正在读取当前配置…'}</small></div><span className={`chat-agent-state${context?.agent.configured ? ' is-ready' : ''}`}>{context?.agent.configured ? '运行时就绪' : '等待检查配置'}</span></div>
       {error ? <div className="settings-message settings-message--error" role="alert"><CircleAlert size={17} />{error}</div> : null}
       <div className="chat-layout">
         <aside className="panel conversation-panel" aria-label="我的历史对话">
           <div className="conversation-panel__heading"><strong>我的对话</strong><span>{conversations.length}</span></div>
-          <div className="conversation-list">{conversations.map((conversation) => <button type="button" key={conversation.id} className={selectedId === conversation.id ? 'is-selected' : ''} onClick={() => openConversation(conversation.id)} disabled={sending}><MessageSquareText size={15} /><span><strong>{conversation.title}</strong><small>{formatTime(conversation.updatedAt)}</small></span></button>)}
+          <div className="conversation-list">{conversations.map((conversation) => <button type="button" key={conversation.id} className={selectedId === conversation.id ? 'is-selected' : ''} onClick={() => openConversation(conversation)}>{pending[conversation.uiKey] ? <LoaderCircle className="spin" size={15} /> : <MessageSquareText size={15} />}<span><strong>{conversation.title}</strong><small>{pending[conversation.uiKey] ? '正在生成，可切换对话' : formatTime(conversation.updatedAt)}</small></span></button>)}
           {!loading && !conversations.length ? <div className="conversation-empty"><MessageSquareText size={22} /><p>当前店铺＋站点还没有对话。</p></div> : null}</div>
-          <p className="conversation-privacy"><ShieldCheck size={13} />仅自己可见，其他用户无法读取</p>
+          <p className="conversation-privacy"><ShieldCheck size={13} />{session.currentTenant.environment === 'demo' ? '每位 Demo 访客对话独立保存' : '仅自己可见，其他用户无法读取'}</p>
         </aside>
 
         <section className="panel chat-workbench" aria-label="广告分析对话区">
@@ -150,17 +180,17 @@ export default function AiChatPage({ session, storeId, onStoreChange, onSwitchTe
           <div className="chat-data-scope"><Database size={14} /><span>数据范围：{Object.entries(REPORT_LABELS).map(([type, label]) => <span key={type} className={context?.datasets[type] ? 'is-available' : 'is-unavailable'}>{label}{context?.datasets[type] ? ` ${context.datasets[type].rowCount} 行` : ' 未导入'}</span>)}</span></div>
 
           <div className="chat-messages" aria-live="polite">
-            {loading ? <div className="chat-empty"><LoaderCircle className="spin" size={25} /><strong>正在加载数据范围与历史对话…</strong></div> : messages.length ? messages.map((message) => <article key={message.id} className={`chat-message chat-message--${message.role}`}>
+            {loading || loadingKeys[selectedKey] ? <div className="chat-empty"><LoaderCircle className="spin" size={25} /><strong>正在加载数据范围与历史对话…</strong></div> : messages.length ? messages.map((message) => <article key={message.id} className={`chat-message chat-message--${message.role}`}>
               <div className="chat-message__avatar">{message.role === 'user' ? session.user.displayName.slice(0, 1) : <Sparkles size={17} />}</div>
-              <div className="chat-message__content"><div className="chat-message__meta"><strong>{message.role === 'user' ? '我' : '广告 AI'}</strong><span>{formatTime(message.createdAt)}</span></div><div className="chat-message__bubble">{message.content}</div><A2uiChatSurface key={`ui-${message.id}`} ui={message.ui} />{message.ui?.status === 'fallback' ? <div className="a2ui-fallback" role="status">本轮结构化视图未通过校验，已自动降级为文字分析。</div> : null}{message.skills?.length ? <div className="chat-message__skills"><Sparkles size={12} />{message.skills.map((skill) => skill.name).join('、')}</div> : null}{message.model ? <div className="chat-message__model">{message.model}</div> : null}</div>
-            </article>) : <div className="chat-empty"><span className="chat-empty__icon"><MessageSquareText size={27} /></span><h2>从当前广告数据开始提问</h2><p>AI 会读取您有权访问的当前店铺＋站点数据。可选择下方问题，也可以输入自己的分析目标。</p><div className="chat-suggestions">{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div></div>}
-            {sending ? <div className="chat-thinking"><LoaderCircle className="spin" size={17} /><span>{context?.agent.name} 正在分析 {availableCount} 类报表{selectedSkillNames.length ? `，并加载 ${selectedSkillNames.join('、')}` : ''}…</span></div> : null}
+              <div className="chat-message__content"><div className="chat-message__meta"><strong>{message.role === 'user' ? '我' : '广告 AI'}</strong><span>{formatTime(message.createdAt)}</span></div><div className="chat-message__bubble">{message.content}</div><A2uiChatSurface key={`ui-${message.id}`} ui={message.ui} messageId={message.id} storeId={storeId} viewState={message.viewState} />{message.ui?.status === 'fallback' ? <div className="a2ui-fallback" role="status">本轮结构化视图未通过校验，已自动降级为文字分析。</div> : null}{message.skills?.length ? <div className="chat-message__skills"><Sparkles size={12} />{message.skills.map((skill) => skill.name).join('、')}</div> : null}{message.model ? <div className="chat-message__model">{message.model}</div> : null}</div>
+            </article>) : <div className="chat-empty"><span className="chat-empty__icon"><MessageSquareText size={27} /></span><h2>从当前广告数据开始提问</h2><p>AI 会读取您有权访问的当前店铺＋站点数据。可选择下方问题，也可以输入自己的分析目标。</p><div className="chat-suggestions">{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} onClick={() => setInputs((previous) => ({ ...previous, [selectedKey]: suggestion }))}>{suggestion}</button>)}</div></div>}
+            {sending ? <div className="chat-thinking"><LoaderCircle className="spin" size={17} /><span>{context?.agent.name} 正在分析 {availableCount} 类报表{currentPending.skillNames.length ? `，并加载 ${currentPending.skillNames.join('、')}` : ''}；可新建或切换其他对话。</span></div> : null}
             <div ref={messageEndRef} />
           </div>
 
           <form className="chat-composer" onSubmit={send}>
             {selectedSkillNames.length ? <div className="composer-skills"><Sparkles size={13} />本次加载：{selectedSkillNames.join('、')}</div> : null}
-            <textarea value={input} onChange={(event) => setInput(event.target.value)} maxLength={4000} rows={3} placeholder="输入广告分析问题；Enter 发送，Shift + Enter 换行" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} disabled={sending || !context} />
+            <textarea value={input} onChange={(event) => setInputs((previous) => ({ ...previous, [selectedKey]: event.target.value }))} maxLength={4000} rows={3} placeholder="输入广告分析问题；Enter 发送，Shift + Enter 换行" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} disabled={sending || !context} />
             <div className="chat-composer__footer"><span>仅发送当前授权范围的数据；AI 建议需人工复核，发送会产生模型费用。</span><button type="submit" className="primary-button" disabled={sending || !input.trim() || !context?.agent.configured || !availableCount}>{sending ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}{sending ? '正在分析…' : '发送'}</button></div>
           </form>
         </section>
