@@ -19,7 +19,7 @@ export default function PlacementStrategyTable({ rows }) {
           <caption className="sr-only">竞价策略和广告位组合汇总</caption>
           <thead><tr>
             <th className="align-left">竞价策略</th><th className="align-left">广告位</th><th>活动数</th><th>原始行数</th>
-            <th>花费</th><th>销售额</th><th>订单</th><th>CPC</th><th>CVR</th><th>CPO</th><th>ACOS</th><th>样本提示</th>
+            <th>展示量</th><th>点击量</th><th>CTR</th><th>花费</th><th>销售额</th><th>订单</th><th>CPC</th><th>CVR</th><th>CPO</th><th>ACOS</th><th>样本提示</th>
           </tr></thead>
           <tbody>
             {rows.map((row) => (
@@ -27,6 +27,7 @@ export default function PlacementStrategyTable({ rows }) {
                 <td className="align-left keyword-cell">{row.biddingStrategy}</td>
                 <td className="align-left"><span className="placement-label"><i style={{ backgroundColor: PLACEMENT_MAP.get(row.placement)?.color }} aria-hidden="true" />{row.placementLabel}</span></td>
                 <td>{formatNumber(row.campaignCount)}</td><td>{formatNumber(row.rowCount)}</td>
+                <td>{formatNumber(row.impressions)}</td><td>{formatNumber(row.clicks)}</td><td>{formatPercent(row.ctr)}</td>
                 <td>{money(row.spend)}</td><td>{money(row.sales)}</td><td>{formatNumber(row.orders)}</td>
                 <td>{money(row.cpc)}</td><td>{formatPercent(row.cvr)}</td><td>{money(row.cpo)}</td>
                 <td className="metric-emphasis">{formatPercent(row.acos)}</td>

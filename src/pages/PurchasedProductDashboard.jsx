@@ -4,6 +4,7 @@ import AppShell, { Brand } from '../components/AppShell.jsx';
 import StatCard from '../components/StatCard.jsx';
 import PurchasedProductAiAnalysis from '../components/purchased/PurchasedProductAiAnalysis.jsx';
 import PurchasedProductExplorer from '../components/purchased/PurchasedProductExplorer.jsx';
+import PurchasedProductSalesCompositionChart from '../components/purchased/PurchasedProductSalesCompositionChart.jsx';
 import PurchasedProductTrendChart from '../components/purchased/PurchasedProductTrendChart.jsx';
 import TopPurchasedProductChart from '../components/purchased/TopPurchasedProductChart.jsx';
 import { buildPurchasedProductSnapshot, filterPurchasedProductRows, preparePurchasedProductData } from '../lib/purchasedProductData.js';
@@ -46,6 +47,7 @@ export default function PurchasedProductDashboard({ session, storeId, onStoreCha
         </section>
         <PurchasedProductAiAnalysis snapshot={snapshot} range={range} datasetId={data.datasetId} storeId={storeId} tenantId={session.currentTenant.id} />
         <div className="charts-grid placement-charts-grid"><PurchasedProductTrendChart snapshot={snapshot} dates={filteredDates} /><TopPurchasedProductChart items={snapshot.purchased} /></div>
+        <PurchasedProductSalesCompositionChart items={snapshot.purchased} paths={snapshot.paths} />
         <PurchasedProductExplorer snapshot={snapshot} startDate={range.startDate} endDate={range.endDate} />
         <footer className="dashboard-footer"><p>演示数据：{data.storeCode} 商品推广已购买商品报告 · 原始 {formatNumber(data.totalRows)} 行 · 跳过 {formatNumber(data.skippedRows)} 行 · 重复粒度 {formatNumber(data.duplicateRows)} 行</p><p>仅有其他 SKU 销售额、订单与销售量；缺少花费、点击、利润、库存和父子 ASIN 映射，商品角色均需进一步验证。</p></footer>
       </main>

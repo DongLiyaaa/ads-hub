@@ -1,4 +1,4 @@
-import { BarChart3, Building2, LogOut, MapPinned, RefreshCw, Settings2, ShoppingBag, UsersRound } from 'lucide-react';
+import { BarChart3, Blocks, Building2, LogOut, MapPinned, MessageSquareText, RefreshCw, Settings2, ShoppingBag, UsersRound } from 'lucide-react';
 import DateRangeFilter from './DateRangeFilter.jsx';
 
 function GitHubIcon() {
@@ -43,9 +43,15 @@ export default function AppShell({ page, session, storeId, onStoreChange, onSwit
   const isAdmin = session?.currentTenant.role === 'admin';
   const currentStore = session?.stores.find((store) => store.id === storeId);
   return (
-    <div className="app-shell">
+    <div className={`app-shell app-shell--${page}`}>
       <aside className="app-sidebar">
         <Brand />
+        <nav className="report-nav report-nav--primary" aria-label="AI 工作台">
+          <a href="#/ai-chat" className={page === 'ai-chat' ? 'is-active' : ''} aria-current={page === 'ai-chat' ? 'page' : undefined}>
+            <span className="report-nav__icon"><MessageSquareText size={18} strokeWidth={1.8} /></span>
+            <span className="report-nav__copy"><strong>广告 AI 对话</strong><small>三类报表 · Skill 增强</small></span>
+          </a>
+        </nav>
         <div className="sidebar-section-label">REPORT LIBRARY</div>
         <nav className="report-nav" aria-label="报表分析导航">
           {REPORTS.map((report, index) => {
@@ -62,13 +68,17 @@ export default function AppShell({ page, session, storeId, onStoreChange, onSwit
           {isAdmin ? <>
             <a href="#/tenant-admin" className={page === 'tenant-admin' ? 'is-active' : ''} aria-current={page === 'tenant-admin' ? 'page' : undefined}>
               <span className="report-nav__icon"><UsersRound size={18} strokeWidth={1.8} /></span>
-              <span className="report-nav__copy"><strong>租户与权限</strong><small>用户、店铺与访问分配</small></span>
+              <span className="report-nav__copy"><strong>租户与权限</strong><small>用户、店铺＋站点与访问分配</small></span>
             </a>
             <a href="#/agent-settings" className={page === 'agent-settings' ? 'is-active' : ''} aria-current={page === 'agent-settings' ? 'page' : undefined}>
               <span className="report-nav__icon"><Settings2 size={18} strokeWidth={1.8} /></span>
               <span className="report-nav__copy"><strong>Agent 与模型</strong><small>执行器、协议与连通性</small></span>
             </a>
           </> : null}
+          <a href="#/skills" className={page === 'skills' ? 'is-active' : ''} aria-current={page === 'skills' ? 'page' : undefined}>
+            <span className="report-nav__icon"><Blocks size={18} strokeWidth={1.8} /></span>
+            <span className="report-nav__copy"><strong>Skill 管理</strong><small>私有创建、授权与加载</small></span>
+          </a>
         </nav>
         <div className="sidebar-footer"><span className="sidebar-status-dot" aria-hidden="true" /><span>{isAdmin ? '租户管理员' : '普通用户'} · {session?.user.displayName}</span><small>{session?.currentTenant.name}</small></div>
       </aside>
@@ -77,10 +87,10 @@ export default function AppShell({ page, session, storeId, onStoreChange, onSwit
           <div className="app-header__inner">
             <div className="workspace-selectors">
               <label><Building2 size={15} /><span className="sr-only">当前租户</span><select value={session?.currentTenant.id || ''} onChange={(event) => onSwitchTenant(event.target.value)} disabled={session?.tenants.length <= 1}>{session?.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
-              <label><span className="sr-only">当前店铺</span><select value={storeId || ''} onChange={(event) => onStoreChange(event.target.value)} disabled={!session?.stores.length}><option value="" disabled>请选择店铺</option>{session?.stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.site}</option>)}</select></label>
+              <label><span className="sr-only">当前店铺＋站点</span><select value={storeId || ''} onChange={(event) => onStoreChange(event.target.value)} disabled={!session?.stores.length}><option value="" disabled>请选择店铺＋站点</option>{session?.stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.code} · {store.site}</option>)}</select></label>
             </div>
             <div className="header-actions">
-              <span className="report-context">{currentStore ? `${currentStore.code} · 商品推广` : reportContext || session?.currentTenant.name}</span>
+              <span className="report-context">{currentStore ? `${currentStore.code} · ${currentStore.site} · 商品推广` : reportContext || session?.currentTenant.name}</span>
               {dateProps ? <DateRangeFilter {...dateProps} /> : null}
               {onRefresh ? <div className="cache-controls"><button type="button" className="icon-button" onClick={onRefresh} title="绕过缓存并重新获取报表" aria-label="刷新报表"><RefreshCw size={16} /></button>{cacheInfo ? <small>{cacheInfo.source === 'cache' ? '已读本地缓存' : '已回源'}{cacheInfo.cacheFailed ? ' · 本次未写入本地缓存' : ' · 缓存 2 小时'}</small> : null}</div> : null}
               <div className="header-user"><span title={session?.user.email}>{session?.user.displayName}</span><button type="button" className="icon-button" onClick={onLogout} title="退出登录并清除本地报表缓存" aria-label="退出登录"><LogOut size={16} /></button></div>

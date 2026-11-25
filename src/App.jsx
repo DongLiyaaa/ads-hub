@@ -4,17 +4,21 @@ import PlacementDashboard from './pages/PlacementDashboard.jsx';
 import PurchasedProductDashboard from './pages/PurchasedProductDashboard.jsx';
 import AgentSettingsPage from './pages/AgentSettingsPage.jsx';
 import TenantAdminPage from './pages/TenantAdminPage.jsx';
+import AiChatPage from './pages/AiChatPage.jsx';
+import SkillManagementPage from './pages/SkillManagementPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import AppShell, { Brand } from './components/AppShell.jsx';
 import { apiFetch } from './lib/api.js';
 import { clearReportCache } from './lib/reportCache.js';
 
 const PAGE_TITLES = {
+  'ai-chat': '广告 AI 对话 · ShareScope',
   'search-share': '搜索词展示份额 · ShareScope',
   placement: '广告位报表分析 · ShareScope',
   'purchased-product': '已购买商品报表分析 · ShareScope',
   'agent-settings': 'Agent 与模型配置 · ShareScope',
   'tenant-admin': '租户与权限 · ShareScope',
+  skills: 'Skill 管理 · ShareScope',
 };
 
 function getReportPage() {
@@ -103,9 +107,11 @@ export default function App() {
   const commonProps = { session, storeId: selectedStoreId, onStoreChange: setSelectedStoreId, onSwitchTenant: switchTenant, onLogout: logout };
   const workspaceKey = `${session.user.id}:${session.currentTenant.id}`;
   let content;
-  if (!selectedStoreId && !['tenant-admin', 'agent-settings'].includes(effectivePage)) {
+  if (!selectedStoreId && !['tenant-admin', 'agent-settings', 'skills'].includes(effectivePage)) {
     content = <AppShell {...commonProps} page={effectivePage}><main className="dashboard"><section className="panel empty-workspace"><h1>尚未分配可用店铺</h1><p>{isAdmin ? '请先在“租户与权限”中创建店铺。' : '请联系租户管理员分配店铺；服务端不会返回其他店铺的数据。'}</p></section></main></AppShell>;
   } else if (effectivePage === 'placement') content = <PlacementDashboard key={workspaceKey} {...commonProps} />;
+  else if (effectivePage === 'ai-chat') content = <AiChatPage key={workspaceKey} {...commonProps} />;
+  else if (effectivePage === 'skills') content = <SkillManagementPage key={workspaceKey} {...commonProps} />;
   else if (effectivePage === 'purchased-product') content = <PurchasedProductDashboard key={workspaceKey} {...commonProps} />;
   else if (effectivePage === 'agent-settings') content = <AgentSettingsPage key={workspaceKey} {...commonProps} />;
   else if (effectivePage === 'tenant-admin') content = <TenantAdminPage key={workspaceKey} {...commonProps} onSessionRefresh={loadSession} />;

@@ -20,7 +20,7 @@ function MemberRow({ member, stores, onSave }) {
   return <tr>
     <td><strong>{member.displayName}</strong><small>{member.email}</small></td>
     <td><select value={role} onChange={(event) => setRole(event.target.value)} aria-label={`${member.displayName} 的角色`}><option value="user">普通用户</option><option value="admin">管理员</option></select></td>
-    <td>{role === 'admin' ? <span className="admin-all-stores">全部店铺</span> : <StoreChecks stores={stores} value={storeIds} onChange={setStoreIds} />}</td>
+    <td>{role === 'admin' ? <span className="admin-all-stores">全部店铺＋站点</span> : <StoreChecks stores={stores} value={storeIds} onChange={setStoreIds} />}</td>
     <td><label className="active-toggle"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />{active ? '启用' : '停用'}</label></td>
     <td><button type="button" className="secondary-button" onClick={save} disabled={saving}>{saving ? <LoaderCircle size={14} className="spin" /> : <Save size={14} />}保存</button></td>
   </tr>;
@@ -49,11 +49,11 @@ export default function TenantAdminPage({ session, storeId, onStoreChange, onSwi
   };
   const createUser = async (event) => {
     event.preventDefault();
-    if (await run('user', () => apiFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(newUser) }), '用户已创建，店铺权限已生效')) setNewUser({ displayName: '', email: '', password: '', role: 'user', storeIds: [] });
+    if (await run('user', () => apiFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(newUser) }), '用户已创建，店铺＋站点权限已生效')) setNewUser({ displayName: '', email: '', password: '', role: 'user', storeIds: [] });
   };
   const createStore = async (event) => {
     event.preventDefault();
-    if (await run('store', () => apiFetch('/api/admin/stores', { method: 'POST', body: JSON.stringify(newStore) }), '店铺已创建，可立即分配给用户')) setNewStore({ name: '', code: '', site: 'Amazon.com' });
+    if (await run('store', () => apiFetch('/api/admin/stores', { method: 'POST', body: JSON.stringify(newStore) }), '店铺＋站点已创建，可立即分配给用户')) setNewStore({ name: '', code: '', site: 'Amazon.com' });
   };
   const createTenant = async (event) => {
     event.preventDefault();
@@ -69,7 +69,7 @@ export default function TenantAdminPage({ session, storeId, onStoreChange, onSwi
 
   return <AppShell page="tenant-admin" session={session} storeId={storeId} onStoreChange={onStoreChange} onSwitchTenant={onSwitchTenant} onLogout={onLogout} reportContext="租户管理">
     <main className="dashboard tenant-admin-page">
-      <div className="page-heading"><div><h1>租户与权限</h1><p>管理 {session.currentTenant.name} 的成员、店铺及访问范围。</p></div><span className="role-summary">{data?.users.length || 0} 名成员 · {data?.stores.length || 0} 个店铺</span></div>
+      <div className="page-heading"><div><h1>租户与权限</h1><p>管理 {session.currentTenant.name} 的成员、店铺＋站点及访问范围。</p></div><span className="role-summary">{data?.users.length || 0} 名成员 · {data?.stores.length || 0} 个店铺＋站点</span></div>
       {error ? <div className="settings-message settings-message--error" role="alert"><CircleAlert size={17} />{error}</div> : null}
       {notice ? <div className="settings-message settings-message--success" role="status"><CheckCircle2 size={17} />{notice}</div> : null}
       <div className="admin-create-grid">
@@ -78,20 +78,20 @@ export default function TenantAdminPage({ session, storeId, onStoreChange, onSwi
             <label className="settings-field"><span className="settings-field__label">姓名</span><input required value={newUser.displayName} onChange={(event) => setNewUser({ ...newUser, displayName: event.target.value })} /></label>
             <label className="settings-field"><span className="settings-field__label">邮箱</span><input required type="email" value={newUser.email} onChange={(event) => setNewUser({ ...newUser, email: event.target.value })} autoComplete="off" /></label>
             <label className="settings-field"><span className="settings-field__label">初始密码</span><input required minLength={12} maxLength={128} type="password" value={newUser.password} onChange={(event) => setNewUser({ ...newUser, password: event.target.value })} autoComplete="new-password" /></label>
-            <label className="settings-field"><span className="settings-field__label">角色</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}><option value="user">普通用户 · 仅分配店铺</option><option value="admin">管理员 · 全部店铺</option></select></label>
-            {newUser.role === 'user' ? <div className="settings-field"><span className="settings-field__label">分配店铺</span><StoreChecks stores={data?.stores || []} value={newUser.storeIds} onChange={(storeIds) => setNewUser({ ...newUser, storeIds })} /></div> : null}
+            <label className="settings-field"><span className="settings-field__label">角色</span><select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value })}><option value="user">普通用户 · 仅分配店铺＋站点</option><option value="admin">管理员 · 全部店铺＋站点</option></select></label>
+            {newUser.role === 'user' ? <div className="settings-field"><span className="settings-field__label">分配店铺＋站点</span><StoreChecks stores={data?.stores || []} value={newUser.storeIds} onChange={(storeIds) => setNewUser({ ...newUser, storeIds })} /></div> : null}
             <button className="primary-button" type="submit" disabled={busy === 'user'}>{busy === 'user' ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}创建用户</button>
           </form>
         </section>
         <div className="admin-side-forms">
-          <section className="panel admin-form-panel"><div className="settings-section-heading"><div><h2>新增店铺 / 站点</h2><p>店铺编码只需在当前租户内唯一。</p></div><Store size={19} /></div>
-            <form onSubmit={createStore} className="admin-form admin-form--compact"><label className="settings-field"><span className="settings-field__label">店铺名称</span><input required value={newStore.name} onChange={(event) => setNewStore({ ...newStore, name: event.target.value })} /></label><div className="admin-inline-fields"><label className="settings-field"><span className="settings-field__label">编码</span><input required value={newStore.code} onChange={(event) => setNewStore({ ...newStore, code: event.target.value })} placeholder="US12" /></label><label className="settings-field"><span className="settings-field__label">站点</span><input required value={newStore.site} onChange={(event) => setNewStore({ ...newStore, site: event.target.value })} /></label></div><button className="secondary-button" type="submit" disabled={busy === 'store'}><Plus size={15} />新增店铺</button></form>
+          <section className="panel admin-form-panel"><div className="settings-section-heading"><div><h2>新增店铺 / 站点</h2><p>同一店铺编码可配置多个站点；编码＋站点组合在当前租户内唯一。</p></div><Store size={19} /></div>
+            <form onSubmit={createStore} className="admin-form admin-form--compact"><label className="settings-field"><span className="settings-field__label">店铺名称</span><input required value={newStore.name} onChange={(event) => setNewStore({ ...newStore, name: event.target.value })} /></label><div className="admin-inline-fields"><label className="settings-field"><span className="settings-field__label">编码</span><input required value={newStore.code} onChange={(event) => setNewStore({ ...newStore, code: event.target.value })} placeholder="US12" /></label><label className="settings-field"><span className="settings-field__label">站点</span><input required value={newStore.site} onChange={(event) => setNewStore({ ...newStore, site: event.target.value })} /></label></div><button className="secondary-button" type="submit" disabled={busy === 'store'}><Plus size={15} />新增店铺＋站点</button></form>
           </section>
           <details className="panel new-tenant-panel"><summary><Building2 size={17} /><span><strong>创建独立租户</strong><small>适合独立团队；数据、Agent 和 OAuth 均隔离</small></span></summary><form onSubmit={createTenant} className="admin-form"><label className="settings-field"><span className="settings-field__label">租户名称</span><input required value={newTenant.name} onChange={(event) => setNewTenant({ ...newTenant, name: event.target.value })} /></label><label className="settings-field"><span className="settings-field__label">首个店铺</span><input required value={newTenant.storeName} onChange={(event) => setNewTenant({ ...newTenant, storeName: event.target.value })} /></label><div className="admin-inline-fields"><label className="settings-field"><span className="settings-field__label">编码</span><input required value={newTenant.code} onChange={(event) => setNewTenant({ ...newTenant, code: event.target.value })} /></label><label className="settings-field"><span className="settings-field__label">站点</span><input required value={newTenant.site} onChange={(event) => setNewTenant({ ...newTenant, site: event.target.value })} /></label></div><button className="secondary-button" type="submit" disabled={busy === 'tenant'}>创建并切换</button></form></details>
         </div>
       </div>
-      <section className="panel members-panel"><div className="settings-section-heading"><div><h2>成员与店铺分配</h2><p>普通用户只可读取勾选店铺；管理员自动访问本租户全部店铺。服务端每次请求都会复核。</p></div></div>
-        <div className="protocol-table-scroll"><table className="members-table"><thead><tr><th>用户</th><th>角色</th><th>可访问店铺</th><th>状态</th><th>操作</th></tr></thead><tbody>{data?.users.map((member) => <MemberRow key={member.membershipId} member={member} stores={data.stores} onSave={(id, input) => run(`member-${id}`, () => apiFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) }), '成员权限已更新')} />) || <tr><td colSpan="5"><LoaderCircle className="spin" size={20} /></td></tr>}</tbody></table></div>
+      <section className="panel members-panel"><div className="settings-section-heading"><div><h2>成员与店铺＋站点分配</h2><p>普通用户只可读取勾选的店铺＋站点；管理员自动访问本租户全部店铺＋站点。服务端每次请求都会复核。</p></div></div>
+        <div className="protocol-table-scroll"><table className="members-table"><thead><tr><th>用户</th><th>角色</th><th>可访问店铺＋站点</th><th>状态</th><th>操作</th></tr></thead><tbody>{data?.users.map((member) => <MemberRow key={member.membershipId} member={member} stores={data.stores} onSave={(id, input) => run(`member-${id}`, () => apiFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) }), '成员权限已更新')} />) || <tr><td colSpan="5"><LoaderCircle className="spin" size={20} /></td></tr>}</tbody></table></div>
       </section>
       <div className="permission-note"><strong>权限边界</strong><span>停用成员会清除其当前租户会话；最后一个启用中的管理员不能被停用或降级。</span></div>
     </main>

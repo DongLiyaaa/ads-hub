@@ -90,7 +90,7 @@ export default function usePersistentAnalysis({ reportType, datasetId, storeId, 
     apiFetch('/api/config', { signal: controller.signal })
       .then((body) => {
         setAgentName(body.model || '分析 Agent');
-        setAgentTimeout(Math.min((Number(body.timeoutSeconds) || 180) + 10, 610));
+        setAgentTimeout(Math.min((Number(body.timeoutSeconds) || 180) + 15, 620));
       })
       .catch(() => {});
     return () => controller.abort();

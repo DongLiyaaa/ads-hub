@@ -7,10 +7,10 @@ export function isAgentAvailable(agentType) {
   return agentType === 'claude-code' ? isClaudeCodeAvailable() : isCodexCliAvailable();
 }
 
-export function runAgentAnalysis(payload, configuration) {
+export function runAgentAnalysis(payload, configuration, options = {}) {
   return configuration.agentType === 'claude-code'
-    ? runClaudeCodeAnalysis(payload, configuration)
-    : runCodexAnalysis(payload, configuration);
+    ? runClaudeCodeAnalysis(payload, configuration, false, options)
+    : runCodexAnalysis(payload, configuration, false, options);
 }
 
 function cliVersion(cli) {

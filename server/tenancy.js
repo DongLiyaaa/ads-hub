@@ -261,7 +261,7 @@ export async function createTenant(auth, input) {
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
-    if (error.code === '23505') throw new AuthError('租户内店铺编码已存在', 409);
+    if (error.code === '23505') throw new AuthError('租户内该店铺编码与站点组合已存在', 409);
     throw error;
   } finally {
     client.release();
@@ -288,9 +288,9 @@ export async function listTenantAdmin(auth) {
 }
 
 function validateStoreIds(storeIds) {
-  if (!Array.isArray(storeIds)) throw new AuthError('店铺分配格式无效');
+  if (!Array.isArray(storeIds)) throw new AuthError('店铺＋站点分配格式无效');
   const unique = [...new Set(storeIds)];
-  if (unique.some((id) => !UUID_PATTERN.test(id))) throw new AuthError('店铺分配包含无效 ID');
+  if (unique.some((id) => !UUID_PATTERN.test(id))) throw new AuthError('店铺＋站点分配包含无效 ID');
   return unique;
 }
 
@@ -298,7 +298,7 @@ async function replaceStoreAccess(client, tenantId, membershipId, storeIds) {
   const ids = validateStoreIds(storeIds);
   if (ids.length) {
     const { rows } = await client.query('SELECT id FROM stores WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
-    if (rows.length !== ids.length) throw new AuthError('不能分配其他租户或不存在的店铺', 403);
+    if (rows.length !== ids.length) throw new AuthError('不能分配其他租户或不存在的店铺＋站点', 403);
   }
   await client.query('DELETE FROM user_store_access WHERE tenant_id = $1 AND membership_id = $2', [tenantId, membershipId]);
   if (ids.length) {
@@ -381,7 +381,7 @@ export async function createStore(auth, input) {
   try {
     await pool.query('INSERT INTO stores (tenant_id, name, code, site) VALUES ($1, $2, $3, $4)', [auth.tenant.id, name, code, site]);
   } catch (error) {
-    if (error.code === '23505') throw new AuthError('当前租户内店铺编码已存在', 409);
+    if (error.code === '23505') throw new AuthError('当前租户内该店铺编码与站点组合已存在', 409);
     throw error;
   }
 }

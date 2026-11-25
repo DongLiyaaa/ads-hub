@@ -16,6 +16,8 @@ const columns = [
   { key: 'impressions', label: '展示量', render: (row) => formatNumber(row.impressions) },
   { key: 'clicks', label: '点击量', render: (row) => formatNumber(row.clicks) },
   { key: 'ctr', label: '点击率', render: (row) => formatPercent(row.ctr) },
+  { key: 'cost', label: '花费', render: (row) => formatCurrency(row.cost) },
+  { key: 'cpc', label: 'CPC', render: (row) => row.cpc == null ? '—' : formatCurrency(row.cpc) },
   { key: 'orders', label: '订单数', render: (row) => formatNumber(row.orders) },
   { key: 'sales', label: '销售额', render: (row) => formatCurrency(row.sales) },
   { key: 'acos', label: 'ACOS', render: (row) => formatPercent(row.acos) },
@@ -76,6 +78,8 @@ export default function KeywordTable({ keywords, startDate, endDate }) {
       '展示量': item.impressions,
       '点击量': item.clicks,
       '点击率': formatPercent(item.ctr),
+      '花费(USD)': item.cost.toFixed(2),
+      'CPC(USD)': item.cpc?.toFixed(2) ?? '',
       '订单数': item.orders,
       '销售额(USD)': item.sales.toFixed(2),
       'ACOS': formatPercent(item.acos),
@@ -112,7 +116,7 @@ export default function KeywordTable({ keywords, startDate, endDate }) {
       </div>
 
       <div className="table-scroll">
-        <table>
+        <table className="keyword-table">
           <caption className="sr-only">按当前时间范围汇总的关键词表现，可点击列标题排序</caption>
           <thead>
             <tr>

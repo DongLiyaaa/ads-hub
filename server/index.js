@@ -5,10 +5,14 @@ import express from 'express';
 import { CodexCliError } from './codex.js';
 import { cancelCodexOAuth, getCodexOAuthState, startCodexOAuth } from './codexOAuth.js';
 import { checkAgentConnection, isAgentAvailable, runAgentAnalysis } from './agentHealth.js';
+import { processChatA2ui } from './a2uiChat.js';
 import { AgentConfigError, getActiveAgentConfig, getAgentSettings, recordAgentCheck, saveAgentSettings } from './configStore.js';
 import { checkDatabase, runMigrations } from './db.js';
 import { getAnalysisDataset, getReportPayload, REPORT_TYPES, ReportDataError } from './reportData.js';
 import { getLatestAnalysis, saveAnalysis } from './analysisStore.js';
+import { buildChatData, getChatContext } from './chatData.js';
+import { getConversation, getRecentMessages, listConversations, saveChatExchange } from './chatStore.js';
+import { deleteSkill, getSkillOptions, getSkillsForChat, listSkills, saveSkill } from './skills.js';
 import {
   AuthError, authenticate, clearSessionCookie, createStore, createTenant, createTenantUser,
   getSessionPayload, getSetupStatus, listTenantAdmin, loginAdministratorOrUser, logout,
@@ -19,6 +23,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const activeRequests = new Map();
+const activeTenantTasks = new Map();
 
 function removeUnsupportedCharacters(value) {
   if (typeof value === 'string') return value.replaceAll('\u0000', '');
@@ -121,6 +126,134 @@ app.post('/api/admin/stores', requireAdmin, async (request, response) => {
   response.status(201).json({ ok: true });
 });
 
+app.get('/api/skills', async (request, response) => {
+  const [skills, options] = await Promise.all([
+    listSkills(request.auth, { storeId: request.query.storeId || null }),
+    getSkillOptions(request.auth),
+  ]);
+  response.json({ skills, options, isAdmin: request.auth.tenant.role === 'admin' });
+});
+app.post('/api/skills', async (request, response) => {
+  const id = await saveSkill(request.auth, removeUnsupportedCharacters(request.body));
+  response.status(201).json({ id });
+});
+app.put('/api/skills/:skillId', async (request, response) => {
+  const id = await saveSkill(request.auth, removeUnsupportedCharacters(request.body), request.params.skillId);
+  response.json({ id });
+});
+app.delete('/api/skills/:skillId', async (request, response) => {
+  await deleteSkill(request.auth, request.params.skillId);
+  response.json({ ok: true });
+});
+
+app.get('/api/chat/bootstrap', async (request, response) => {
+  const [context, skills, agentConfig] = await Promise.all([
+    getChatContext(request.auth, request.query.storeId),
+    listSkills(request.auth, { storeId: request.query.storeId }),
+    getActiveAgentConfig(request.auth.tenant.id),
+  ]);
+  response.json({
+    ...context,
+    skills,
+    agent: {
+      type: agentConfig.agentType,
+      name: agentConfig.name,
+      model: agentConfig.model || 'CLI 默认模型',
+      timeoutSeconds: agentConfig.timeoutSeconds || 180,
+      configured: isAgentAvailable(agentConfig.agentType),
+    },
+  });
+});
+app.get('/api/chat/conversations', async (request, response) => {
+  response.json({ conversations: await listConversations(request.auth, request.query.storeId) });
+});
+app.get('/api/chat/conversations/:conversationId', async (request, response) => {
+  response.json(await getConversation(request.auth, request.params.conversationId, request.query.storeId));
+});
+app.post('/api/chat/messages', async (request, response) => {
+  const payload = removeUnsupportedCharacters(request.body);
+  const message = String(payload?.message || '').trim();
+  if (!message || message.length > 4000) return response.status(400).json({ error: '请输入 1–4000 个字符的问题' });
+  const agentConfig = await getActiveAgentConfig(request.auth.tenant.id);
+  if (!isAgentAvailable(agentConfig.agentType)) {
+    return response.status(503).json({ error: `未找到 ${agentConfig.name}，请联系租户管理员检查 Agent 与模型配置。` });
+  }
+  const tenantId = request.auth.tenant.id;
+  const previousTask = activeTenantTasks.get(tenantId);
+  if (previousTask?.clientDisconnected) {
+    previousTask.controller.abort();
+    await Promise.race([previousTask.done, new Promise((resolve) => setTimeout(resolve, 4000))]);
+  }
+  const tenantRequests = activeRequests.get(tenantId) || 0;
+  const totalRequests = [...activeRequests.values()].reduce((sum, count) => sum + count, 0);
+  if (tenantRequests >= 1 || totalRequests >= 2) return response.status(429).json({ error: '已有分析或对话任务正在进行，请稍后重试。' });
+
+  const abortController = new AbortController();
+  let resolveTaskDone;
+  const taskDone = new Promise((resolve) => { resolveTaskDone = resolve; });
+  const taskEntry = { controller: abortController, clientDisconnected: false, done: taskDone };
+  const handleDisconnect = () => {
+    if (response.writableEnded) return;
+    taskEntry.clientDisconnected = true;
+    abortController.abort();
+  };
+  request.on('aborted', handleDisconnect);
+  response.on('close', handleDisconnect);
+  activeRequests.set(tenantId, tenantRequests + 1);
+  activeTenantTasks.set(tenantId, taskEntry);
+  let stage = 'dataset';
+  try {
+    const [chatData, skills, history] = await Promise.all([
+      buildChatData(request.auth, payload),
+      getSkillsForChat(request.auth, payload?.skillIds || [], payload?.storeId),
+      getRecentMessages(request.auth, payload?.conversationId, payload?.storeId),
+    ]);
+    const promptPayload = {
+      reportType: 'advertising-chat',
+      store: chatData.store,
+      range: chatData.range,
+      question: message,
+      history,
+      skills,
+      reports: chatData.reports,
+    };
+    if (JSON.stringify(promptPayload).length > 6000000) {
+      throw new ReportDataError('当前对话数据超过 6MB，请缩短时间范围后重试。', 413);
+    }
+    stage = 'model';
+    const generated = await runAgentAnalysis(promptPayload, agentConfig, { signal: abortController.signal });
+    const processed = processChatA2ui(generated.analysis, chatData);
+    stage = 'database';
+    const saved = await saveChatExchange(request.auth, {
+      conversationId: payload?.conversationId || null,
+      storeId: chatData.store.id,
+      message,
+      answer: processed.answer,
+      ui: processed.ui,
+      skills,
+      dataSnapshot: chatData.dataSnapshot,
+      agentType: agentConfig.agentType,
+      model: generated.model,
+    });
+    if (response.writableEnded || taskEntry.clientDisconnected) return undefined;
+    return response.status(201).json({ ...saved, data: chatData.dataSnapshot });
+  } catch (error) {
+    if (response.writableEnded || taskEntry.clientDisconnected || error?.status === 499) return undefined;
+    if (error instanceof ReportDataError || error instanceof AgentConfigError || error instanceof AuthError) return response.status(error.status).json({ error: error.message });
+    console.error('Agent chat failed:', `agent=${agentConfig.agentType}`, `stage=${stage}`, `name=${error.name}`, `code=${error.code || 'no-code'}`, `status=${error.status || 'no-status'}`);
+    if (error instanceof CodexCliError) return response.status(error.status).json({ error: error.message });
+    return response.status(502).json({ error: `${agentConfig.name} 对话或结果保存暂时失败，请稍后重试。` });
+  } finally {
+    request.off('aborted', handleDisconnect);
+    response.off('close', handleDisconnect);
+    if (activeTenantTasks.get(tenantId) === taskEntry) activeTenantTasks.delete(tenantId);
+    const remaining = (activeRequests.get(tenantId) || 1) - 1;
+    if (remaining) activeRequests.set(tenantId, remaining);
+    else activeRequests.delete(tenantId);
+    resolveTaskDone();
+  }
+});
+
 async function getPublicAgentSettings(tenantId) {
   const [settings, codexOAuth] = await Promise.all([getAgentSettings(tenantId), getCodexOAuthState(tenantId)]);
   return {
@@ -185,29 +318,54 @@ app.post('/api/analysis', async (request, response) => {
   if (!isAgentAvailable(agentConfig.agentType)) {
     return response.status(503).json({ error: `未找到 ${agentConfig.name}，请联系租户管理员检查 Agent 与模型配置。` });
   }
-  const tenantRequests = activeRequests.get(request.auth.tenant.id) || 0;
+  const tenantId = request.auth.tenant.id;
+  const previousTask = activeTenantTasks.get(tenantId);
+  if (previousTask?.clientDisconnected) {
+    previousTask.controller.abort();
+    await Promise.race([previousTask.done, new Promise((resolve) => setTimeout(resolve, 4000))]);
+  }
+  const tenantRequests = activeRequests.get(tenantId) || 0;
   const totalRequests = [...activeRequests.values()].reduce((sum, count) => sum + count, 0);
   if (tenantRequests >= 1 || totalRequests >= 2) return response.status(429).json({ error: '已有分析任务正在进行，请稍后重试。' });
 
-  activeRequests.set(request.auth.tenant.id, tenantRequests + 1);
+  const abortController = new AbortController();
+  let resolveTaskDone;
+  const taskDone = new Promise((resolve) => { resolveTaskDone = resolve; });
+  const taskEntry = { controller: abortController, clientDisconnected: false, done: taskDone };
+  const handleDisconnect = () => {
+    if (response.writableEnded) return;
+    taskEntry.clientDisconnected = true;
+    abortController.abort();
+  };
+  request.on('aborted', handleDisconnect);
+  response.on('close', handleDisconnect);
+
+  activeRequests.set(tenantId, tenantRequests + 1);
+  activeTenantTasks.set(tenantId, taskEntry);
   let stage = 'dataset';
   try {
     const dataset = await getAnalysisDataset(request.auth, payload);
     const payloadSha256 = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
     stage = 'model';
-    const generated = await runAgentAnalysis(payload, agentConfig);
+    const generated = await runAgentAnalysis(payload, agentConfig, { signal: abortController.signal });
     stage = 'database';
     const result = await saveAnalysis({ dataset, payload, result: generated, payloadSha256, agentConfig });
+    if (response.writableEnded || taskEntry.clientDisconnected) return undefined;
     return response.json(result);
   } catch (error) {
+    if (response.writableEnded || taskEntry.clientDisconnected || error?.status === 499) return undefined;
     if (error instanceof ReportDataError || error instanceof AgentConfigError || error instanceof AuthError) return response.status(error.status).json({ error: error.message });
     console.error('Agent analysis failed:', `agent=${agentConfig.agentType}`, `stage=${stage}`, `name=${error.name}`, `code=${error.code || 'no-code'}`, `status=${error.status || 'no-status'}`);
     if (error instanceof CodexCliError) return response.status(error.status).json({ error: error.message });
     return response.status(502).json({ error: `${agentConfig.name} 分析或结果保存暂时失败，请稍后重试。` });
   } finally {
-    const remaining = (activeRequests.get(request.auth.tenant.id) || 1) - 1;
-    if (remaining) activeRequests.set(request.auth.tenant.id, remaining);
-    else activeRequests.delete(request.auth.tenant.id);
+    request.off('aborted', handleDisconnect);
+    response.off('close', handleDisconnect);
+    if (activeTenantTasks.get(tenantId) === taskEntry) activeTenantTasks.delete(tenantId);
+    const remaining = (activeRequests.get(tenantId) || 1) - 1;
+    if (remaining) activeRequests.set(tenantId, remaining);
+    else activeRequests.delete(tenantId);
+    resolveTaskDone();
   }
 });
 

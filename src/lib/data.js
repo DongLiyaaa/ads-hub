@@ -58,6 +58,7 @@ function finalizeAccumulator(item) {
     cost: item.cost,
     sales: item.sales,
     ctr: ratio(item.clicks * 100, item.impressions),
+    cpc: ratio(item.cost, item.clicks),
     conversionRate: ratio(item.orders * 100, item.clicks),
     acos: ratio(item.cost * 100, item.sales),
     roas: ratio(item.sales, item.cost),
